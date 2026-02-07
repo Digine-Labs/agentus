@@ -1,0 +1,216 @@
+======================================================================
+AGENTUS — SESSION PROGRESS LOG
+======================================================================
+Last updated: 2026-02-07 (Harness Architect session)
+
+======================================================================
+CURRENT STATUS BY PIPELINE STAGE
+======================================================================
+
+Lexer (agentus-lexer)
+  Status: STABLE
+  16 unit tests passing
+  Handles: keywords, operators, strings, string interpolation (state machine),
+           numbers, bools, braces/brackets, comments, multiline
+  Known issues: 2 clippy warnings (collapsible_if) — cosmetic only
+  Risk: LOW — well-tested, stable token set
+
+Parser (agentus-parser)
+  Status: STABLE
+  9 unit tests passing
+  Handles: let, emit, return, if/else, while, for, fn def, agent def, tool def,
+           assign, field assign, expressions (binary, unary, fn call, method call,
+           field access, index access, list literal, map literal, exec block,
+           string interpolation templates)
+  Known issues: 3 clippy warnings (2x collapsible_if, 1x unwrap_or_default) — cosmetic
+  Risk: MEDIUM — parser complexity will grow with new features (map literals
+        are parsed but not fully tested end-to-end)
+
+Sema (agentus-sema)
+  Status: STABLE (minimal)
+  5 unit tests passing
+  Handles: scope-based name resolution, variable definition tracking,
+           function/agent/tool names in global scope, self in agent methods
+  Known issues: None
+  Risk: LOW now, but sema is currently minimal. Type checking is NOT implemented.
+        Future phases will need significant sema expansion.
+
+IR (agentus-ir)
+  Status: STABLE
+  8 unit tests passing
+  67 opcodes defined (many reserved for future phases: Send, Recv, Wait, Kill,
+    PipelineRun, TryBegin/End, Throw, GetError, Yield, GLoad/GStore, etc.)
+  Instruction encoding: 32-bit fixed-width, ABC/ABx/AsBx/sBx formats
+  Module format: constants + functions + agents + tools + entry_function
+  Known issues: None
+  Risk: MEDIUM — bytecode format has no versioning. Adding new fields to Module,
+        AgentDescriptor, or ToolDescriptor could break things. Serde serialization
+        is set up but .agc binary format not yet implemented.
+
+Codegen (agentus-codegen)
+  Status: STABLE
+  4 unit tests + 71 integration tests passing (75 total)
+  Handles: all Phase 1-4 features
+  Known issues: 2 clippy warnings (let_and_return, needless_range_loop) — cosmetic
+  Risk: MEDIUM — compiler grows most with each feature. Sub-emitter pattern is
+        well-established but complex.
+
+Runtime (agentus-runtime)
+  Status: STABLE
+  6 unit tests passing
+  VM handles: all Phase 1-4 opcodes. Unimplemented opcodes return errors.
+  Host interface: EchoHost (testing), NoHost (default)
+  Known issues: 2 clippy warnings (collapsible_if, should_implement_trait) — cosmetic
+  Risk: MEDIUM — VM will need significant changes for Phase 5 (cooperative scheduling,
+        agent message passing). Value type may need extension for maps.
+
+CLI (agentus-cli)
+  Status: STABLE (minimal)
+  0 unit tests (just a thin main() wrapper)
+  Commands: exec, compile (compile is stub — no serialization yet), help, version
+  Known issues: None
+  Risk: LOW
+
+======================================================================
+WHAT WORKS (verified 2026-02-07)
+======================================================================
+
+Build:
+  cargo build --workspace → OK (clean build)
+
+Tests:
+  cargo test --workspace → 119 tests, ALL PASSING
+    - agentus-cli:     0 tests
+    - agentus-codegen: 4 unit + 71 integration = 75 tests
+    - agentus-common:  0 tests
+    - agentus-ir:      8 tests
+    - agentus-lexer:   16 tests
+    - agentus-parser:  9 tests
+    - agentus-runtime: 6 tests
+    - agentus-sema:    5 tests
+
+Examples (all verified working):
+  hello.ags         → "Hello Agentus!"
+  functions.ags     → "42" / "Hello, Agentus!"
+  interpolation.ags → "Hello, World!" / "The sum of 10 and 32 is 42" / "Double of 10 is 20"
+  agent_basic.ags   → "1" / "2" / "3" / "3" / "What is 2+2?" (EchoHost)
+  tools.ags         → formatted tool calls with params
+
+Formatting:
+  cargo fmt --check → FAILS (cosmetic formatting diffs in compiler.rs, vm.rs, etc.)
+  Not blocking — these are style-only differences.
+
+Clippy:
+  cargo clippy --workspace → 9 warnings, 0 errors
+  All warnings are cosmetic (collapsible_if, unwrap_or_default, etc.)
+
+======================================================================
+WHAT IS FAILING OR MISSING
+======================================================================
+
+1. Formatting: `cargo fmt --check` fails. Run `cargo fmt --all` to fix.
+2. Clippy warnings: 9 non-critical warnings. Run `cargo clippy --fix --workspace` to fix.
+3. No CI pipeline: No .github/workflows or other CI config exists.
+4. No .agc serialization: `compile` CLI command is a stub.
+5. No type checking in sema: Only name resolution is implemented.
+6. Phase 5 IN PROGRESS — send/recv done, wait/kill/scheduler TODO.
+7. Phases 6-9 not started (collections, error handling, pipelines, polish).
+8. Map literals: Parsed in AST but no codegen/runtime support yet (Phase 6).
+9. Global memory (GLoad/GStore): Opcodes defined but not implemented.
+
+======================================================================
+PHASE 5 PROGRESS — Multi-Agent
+======================================================================
+
+Micro-milestone 1: send/recv (synchronous message passing) — DONE
+
+  What was implemented:
+  - `send target, message` statement — enqueues message to agent's mailbox
+  - `recv target` expression — dequeues from agent's mailbox, returns none if empty
+  - Each AgentInstance now has a `mailbox: VecDeque<Value>` field
+  - Full pipeline: parser (SendStmt, Expr::Recv) → sema → codegen → runtime
+  - Uses existing Send (0x79) and Recv (0x7A) opcodes
+  - 5 new integration tests, 1 new example (multi_agent.ags)
+
+  Design decisions:
+  - Single mailbox per agent (not inbox/outbox). Can be split later.
+  - `recv` is non-blocking (returns none on empty). Blocking recv needs scheduler.
+  - `send` targets by agent handle — works from any context (not just inside agents).
+  - `recv target` uses parse_postfix() to parse the target expr (allows chaining).
+
+  Files changed:
+  - ast.rs: +SendStmt struct, +Stmt::Send, +Expr::Recv
+  - parser.rs: +parse_send(), +TokenKind::Recv in parse_primary()
+  - resolver.rs: +Stmt::Send, +Expr::Recv resolution
+  - compiler.rs: +Stmt::Send → Send opcode, +Expr::Recv → Recv opcode
+  - vm.rs: +mailbox field, +Send/Recv opcode handlers
+  - end_to_end.rs: +5 tests
+  - examples/multi_agent.ags: new example
+
+  Next micro-milestone: Phase 5, MM2 — `wait` expression
+  - Syntax: `let result = wait agent_handle`
+  - Semantics: Wait for an agent to complete and return its result
+  - Requires: agent "completion" concept (agent runs a task, produces result)
+  - Alternative: skip wait, go to Phase 6 (collections) for more immediate value
+
+======================================================================
+NEXT STEPS (prioritized)
+======================================================================
+
+1. [PHASE 5] Multi-agent, continued:
+   a. DONE: Send/Recv opcodes and agent message queues
+   b. TODO: Wait opcode — need to define agent completion semantics
+   c. TODO: Cooperative yield at Exec, TCall, Recv, Wait points
+   d. TODO: Kill opcode
+   e. TODO: RecvTimeout
+2. [PHASE 6] Collections — map literals and operations
+3. [PHASE 7] Error handling — try/catch/throw
+4. [PHASE 8] Pipelines — pipeline/stage syntax
+5. [PHASE 9] Polish — .agc serialization, error messages, LSP
+6. [STABILIZATION] Run `cargo fmt --all` to fix formatting
+7. [STABILIZATION] Fix clippy warnings (all are auto-fixable)
+
+======================================================================
+OPEN QUESTIONS / RISKS
+======================================================================
+
+- Bytecode versioning: Module format has no version field. Adding one before
+  serialization (Phase 9) would prevent future migration headaches.
+- Cooperative scheduling design: How exactly will agent yields work? Need to decide
+  whether the scheduler is round-robin, priority-based, or event-driven.
+  Current send/recv is synchronous — no scheduling needed yet.
+- Agent completion model: What does "wait" mean? Does an agent "complete"
+  when it returns from a specific method? Or when it's killed? Need to define.
+- Map value representation: Will maps be `HashMap<Value, Value>` or `HashMap<String, Value>`?
+  The AST supports `MapLit(Vec<(Expr, Expr)>)` suggesting arbitrary keys.
+- Type system scope: How much type checking should sema do? Currently zero — this
+  means type errors surface at runtime, which may be acceptable for a DSL.
+
+======================================================================
+LAST VERIFICATION (2026-02-07, session 2)
+======================================================================
+
+$ cargo build --workspace
+  → OK
+
+$ cargo test --workspace
+  → 124 tests, 0 failures (+5 from send/recv)
+
+$ cargo run -p agentus-cli -- exec examples/hello.ags
+  → "Hello Agentus!" ✓
+
+$ cargo run -p agentus-cli -- exec examples/agent_basic.ags
+  → "1" / "2" / "3" / "3" / "What is 2+2?" ✓
+
+$ cargo run -p agentus-cli -- exec examples/multi_agent.ags
+  → "Hello from main to Alice" / "Second message for Alice" /
+    "Hello from main to Bob" / "none" ✓
+
+$ cargo run -p agentus-cli -- exec examples/tools.ags
+  → Tool call output with params ✓
+
+$ cargo run -p agentus-cli -- exec examples/functions.ags
+  → "42" / "Hello, Agentus!" ✓
+
+$ cargo run -p agentus-cli -- exec examples/interpolation.ags
+  → "Hello, World!" / "The sum of 10 and 32 is 42" / "Double of 10 is 20" ✓

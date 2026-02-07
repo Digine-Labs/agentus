@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use agentus_ir::instruction::Instruction;
-use agentus_ir::module::{AgentDescriptor, AgentMemoryField, Function, ModuleBuilder};
+use agentus_ir::module::{AgentDescriptor, AgentMemoryField, Function, ModuleBuilder, ToolDescriptor, ToolParamDescriptor};
 use agentus_ir::opcode::OpCode;
 use agentus_parser::ast::*;
 
@@ -64,6 +64,8 @@ struct FunctionEmitter<'a> {
     function_table: Vec<(String, u32)>,
     /// Agent name → descriptor index in the module.
     agent_table: Vec<(String, u32)>,
+    /// Tool name → (descriptor index, param defaults).
+    tool_table: Vec<(String, u32, Vec<Option<u16>>)>,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -75,6 +77,7 @@ impl<'a> FunctionEmitter<'a> {
             next_register: 0,
             function_table: Vec::new(),
             agent_table: Vec::new(),
+            tool_table: Vec::new(),
         }
     }
 
@@ -132,6 +135,13 @@ impl<'a> FunctionEmitter<'a> {
             Stmt::For(f) => self.compile_for(f),
             Stmt::FnDef(f) => self.compile_fn_def(f),
             Stmt::AgentDef(a) => self.compile_agent_def(a),
+            Stmt::ToolDef(t) => self.compile_tool_def(t),
+            Stmt::Send(s) => {
+                let target_reg = self.compile_expr(&s.target)?;
+                let msg_reg = self.compile_expr(&s.message)?;
+                self.emit(Instruction::abc(OpCode::Send, target_reg, msg_reg, 0));
+                Ok(())
+            }
             Stmt::FieldAssign(fa) => {
                 let val_reg = self.compile_expr(&fa.value)?;
                 // Only self.field = expr is supported
@@ -266,6 +276,10 @@ impl<'a> FunctionEmitter<'a> {
         // Compile function body in a separate emitter
         let (fn_instructions, fn_num_registers) = {
             let mut fn_emitter = FunctionEmitter::new(self.builder);
+            // Propagate tables so functions can call tools, other functions, and agents
+            fn_emitter.function_table = self.function_table.clone();
+            fn_emitter.agent_table = self.agent_table.clone();
+            fn_emitter.tool_table = self.tool_table.clone();
             for param in &func.params {
                 let reg = fn_emitter.alloc_register();
                 fn_emitter.locals.insert(param.name.clone(), reg);
@@ -318,6 +332,10 @@ impl<'a> FunctionEmitter<'a> {
 
             let (fn_instructions, fn_num_registers) = {
                 let mut fn_emitter = FunctionEmitter::new(self.builder);
+                // Propagate tables so methods can call tools, functions, and agents
+                fn_emitter.function_table = self.function_table.clone();
+                fn_emitter.agent_table = self.agent_table.clone();
+                fn_emitter.tool_table = self.tool_table.clone();
                 // Methods don't get an implicit `self` register;
                 // self.field is compiled as MLoad/MStore using the frame's agent_id
                 for param in &method.params {
@@ -353,6 +371,41 @@ impl<'a> FunctionEmitter<'a> {
         let desc_idx = self.builder.add_agent(descriptor);
         self.agent_table.push((agent.name.clone(), desc_idx));
         self.locals.insert(agent.name.clone(), 0); // register the name for resolution
+
+        Ok(())
+    }
+
+    fn compile_tool_def(&mut self, tool: &ToolDef) -> Result<(), String> {
+        let name_idx = self.builder.add_string_constant(&tool.name);
+        let description_idx = tool.description.as_ref().map(|d| self.builder.add_string_constant(d));
+
+        let mut params = Vec::new();
+        let mut param_defaults = Vec::new();
+        for param in &tool.params {
+            let param_name_idx = self.builder.add_string_constant(&param.name);
+            let default_idx = param.default.as_ref().map(|expr| {
+                match expr {
+                    Expr::NumberLit(n, _) => self.builder.add_num_constant(*n),
+                    Expr::StringLit(s, _) => self.builder.add_string_constant(s),
+                    Expr::BoolLit(b, _) => self.builder.add_bool_constant(*b),
+                    _ => self.builder.add_none_constant(),
+                }
+            });
+            params.push(ToolParamDescriptor {
+                name_idx: param_name_idx,
+                default_idx,
+            });
+            param_defaults.push(default_idx);
+        }
+
+        let descriptor = ToolDescriptor {
+            name_idx,
+            description_idx,
+            params,
+        };
+        let desc_idx = self.builder.add_tool(descriptor);
+        self.tool_table.push((tool.name.clone(), desc_idx, param_defaults));
+        self.locals.insert(tool.name.clone(), 0); // register the name for resolution
 
         Ok(())
     }
@@ -483,6 +536,57 @@ impl<'a> FunctionEmitter<'a> {
                     return Ok(result_reg);
                 }
 
+                // Check tool_table next (tool invocation)
+                let tool_info = self
+                    .tool_table
+                    .iter()
+                    .find(|(n, _, _)| n == name)
+                    .map(|(_, idx, defaults)| (*idx, defaults.clone()));
+
+                if let Some((tool_desc_idx, param_defaults)) = tool_info {
+                    // Compile explicit arguments
+                    let mut arg_regs = Vec::new();
+                    for arg in args {
+                        arg_regs.push(self.compile_expr(arg)?);
+                    }
+
+                    // Fill in defaults for missing arguments
+                    let total_params = param_defaults.len();
+                    for i in args.len()..total_params {
+                        if let Some(default_idx) = param_defaults[i] {
+                            let reg = self.alloc_register();
+                            self.emit(Instruction::abx(OpCode::LoadConst, reg, default_idx));
+                            arg_regs.push(reg);
+                        }
+                    }
+
+                    // Copy into consecutive destination registers
+                    let first_arg_reg = self.next_register;
+                    for &src_reg in &arg_regs {
+                        let dest = self.alloc_register();
+                        if src_reg != dest {
+                            self.emit(Instruction::abc(OpCode::Move, dest, src_reg, 0));
+                        }
+                    }
+
+                    let result_reg = self.alloc_register();
+                    // Two-instruction TCall sequence:
+                    // 1. TCall A=result_reg, Bx=tool_desc_idx
+                    // 2. Nop A=0, B=first_arg_reg, C=num_args
+                    self.emit(Instruction::abx(
+                        OpCode::TCall,
+                        result_reg,
+                        tool_desc_idx as u16,
+                    ));
+                    self.emit(Instruction::abc(
+                        OpCode::Nop,
+                        0,
+                        first_arg_reg,
+                        arg_regs.len() as u8,
+                    ));
+                    return Ok(result_reg);
+                }
+
                 // Find the function index
                 let func_idx = self
                     .function_table
@@ -523,7 +627,7 @@ impl<'a> FunctionEmitter<'a> {
                     ));
                     Ok(result_reg)
                 } else {
-                    Err(format!("undefined function '{}'", name))
+                    Err(format!("undefined function or tool '{}'", name))
                 }
             }
             Expr::MethodCall(obj, method_name, args, _) => {
@@ -607,6 +711,12 @@ impl<'a> FunctionEmitter<'a> {
                 let prompt_reg = self.compile_expr(prompt)?;
                 let result_reg = self.alloc_register();
                 self.emit(Instruction::abc(OpCode::Exec, result_reg, prompt_reg, 0));
+                Ok(result_reg)
+            }
+            Expr::Recv(target, _) => {
+                let target_reg = self.compile_expr(target)?;
+                let result_reg = self.alloc_register();
+                self.emit(Instruction::abc(OpCode::Recv, result_reg, target_reg, 0));
                 Ok(result_reg)
             }
         }

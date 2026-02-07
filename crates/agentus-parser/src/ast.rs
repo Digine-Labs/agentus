@@ -32,6 +32,10 @@ pub enum Stmt {
     AgentDef(AgentDef),
     /// Field assignment: `self.field = expr`
     FieldAssign(FieldAssignStmt),
+    /// Tool definition: `tool name { ... }`
+    ToolDef(ToolDef),
+    /// Send message: `send target, message`
+    Send(SendStmt),
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +115,30 @@ pub struct FieldAssignStmt {
 }
 
 #[derive(Debug, Clone)]
+pub struct SendStmt {
+    pub target: Expr,
+    pub message: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolDef {
+    pub name: String,
+    pub description: Option<String>,
+    pub params: Vec<ToolParam>,
+    pub return_type: Option<TypeExpr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolParam {
+    pub name: String,
+    pub type_ann: TypeExpr,
+    pub default: Option<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct FnDef {
     pub name: String,
     pub params: Vec<Param>,
@@ -178,6 +206,8 @@ pub enum Expr {
     MapLit(Vec<(Expr, Expr)>, Span),
     /// Exec block: exec { prompt_expr }
     ExecBlock(Box<Expr>, Span),
+    /// Recv expression: recv agent_handle
+    Recv(Box<Expr>, Span),
 }
 
 impl Expr {
@@ -198,6 +228,7 @@ impl Expr {
             Expr::ListLit(_, s) => *s,
             Expr::MapLit(_, s) => *s,
             Expr::ExecBlock(_, s) => *s,
+            Expr::Recv(_, s) => *s,
         }
     }
 }

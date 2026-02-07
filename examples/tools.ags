@@ -1,0 +1,27 @@
+tool get_weather {
+    description { "Get the current weather for a location" }
+    param location: str
+    param units: str = "celsius"
+    returns str
+}
+
+tool send_email {
+    description { "Send an email" }
+    param to: str
+    param subject: str
+    param body: str
+    returns str
+}
+
+// Call with all params
+let weather = get_weather("London", "fahrenheit")
+emit weather
+
+// Call with default param (units defaults to "celsius")
+let weather2 = get_weather("Tokyo")
+emit weather2
+
+// Use variables as args
+let recipient = "alice@example.com"
+let result = send_email(recipient, "Hello", "How are you?")
+emit result

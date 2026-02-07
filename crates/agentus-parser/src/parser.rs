@@ -64,6 +64,8 @@ impl Parser {
             TokenKind::For => self.parse_for(),
             TokenKind::Fn => self.parse_fn_def(),
             TokenKind::Agent => self.parse_agent_def(),
+            TokenKind::Tool => self.parse_tool_def(),
+            TokenKind::Send => self.parse_send(),
             _ => {
                 // Try to parse as expression statement or assignment
                 let expr = self.parse_expression(0)?;
@@ -383,6 +385,101 @@ impl Parser {
         }))
     }
 
+    fn parse_tool_def(&mut self) -> Result<Stmt, String> {
+        let start = self.current_span();
+        self.expect(TokenKind::Tool)?;
+        let name = self.expect_ident()?;
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+
+        let mut description = None;
+        let mut params = Vec::new();
+        let mut return_type = None;
+
+        while self.current_kind() != TokenKind::RBrace && !self.is_at_end() {
+            match self.current_kind() {
+                TokenKind::Description => {
+                    self.advance(); // consume 'description'
+                    self.expect(TokenKind::LBrace)?;
+                    self.skip_newlines();
+                    if self.current_kind() == TokenKind::StringLit {
+                        let token = self.advance_and_get();
+                        description = Some(token.lexeme);
+                    } else {
+                        return Err(format!(
+                            "expected string for tool description, found {:?} at {:?}",
+                            self.current_kind(),
+                            self.current_span()
+                        ));
+                    }
+                    self.skip_newlines();
+                    self.expect(TokenKind::RBrace)?;
+                    self.skip_newlines();
+                }
+                TokenKind::Param => {
+                    let param_start = self.current_span();
+                    self.advance(); // consume 'param'
+                    let param_name = self.expect_ident()?;
+                    self.expect(TokenKind::Colon)?;
+                    let type_ann = self.parse_type()?;
+                    let default = if self.current_kind() == TokenKind::Assign {
+                        self.advance();
+                        Some(self.parse_expression(0)?)
+                    } else {
+                        Option::None
+                    };
+                    let param_span = param_start.merge(self.prev_span());
+                    params.push(ToolParam {
+                        name: param_name,
+                        type_ann,
+                        default,
+                        span: param_span,
+                    });
+                    self.skip_newlines();
+                }
+                TokenKind::Returns => {
+                    self.advance(); // consume 'returns'
+                    return_type = Some(self.parse_type()?);
+                    self.skip_newlines();
+                }
+                _ => {
+                    return Err(format!(
+                        "unexpected token {:?} in tool definition at {:?}",
+                        self.current_kind(),
+                        self.current_span()
+                    ));
+                }
+            }
+        }
+
+        self.expect(TokenKind::RBrace)?;
+        let span = start.merge(self.prev_span());
+        self.expect_statement_end()?;
+
+        Ok(Stmt::ToolDef(ToolDef {
+            name,
+            description,
+            params,
+            return_type,
+            span,
+        }))
+    }
+
+    fn parse_send(&mut self) -> Result<Stmt, String> {
+        let start = self.current_span();
+        self.expect(TokenKind::Send)?;
+        let target = self.parse_expression(0)?;
+        self.expect(TokenKind::Comma)?;
+        let message = self.parse_expression(0)?;
+        let span = start.merge(message.span());
+        self.expect_statement_end()?;
+        Ok(Stmt::Send(SendStmt {
+            target,
+            message,
+            span,
+        }))
+    }
+
     fn parse_params(&mut self) -> Result<Vec<Param>, String> {
         let mut params = Vec::new();
         if self.current_kind() == TokenKind::RParen {
@@ -631,6 +728,13 @@ impl Parser {
                 let span = start.merge(self.prev_span());
                 Ok(Expr::ExecBlock(Box::new(prompt), span))
             }
+            TokenKind::Recv => {
+                let start = self.current_span();
+                self.advance(); // consume 'recv'
+                let target = self.parse_postfix()?;
+                let span = start.merge(target.span());
+                Ok(Expr::Recv(Box::new(target), span))
+            }
             TokenKind::SelfKw => {
                 let span = self.current_span();
                 self.advance();
@@ -828,7 +932,7 @@ impl Parser {
             match self.current_kind() {
                 TokenKind::Let | TokenKind::Fn | TokenKind::If | TokenKind::While
                 | TokenKind::For | TokenKind::Return | TokenKind::Emit
-                | TokenKind::Agent => return,
+                | TokenKind::Agent | TokenKind::Tool => return,
                 _ => self.advance(),
             }
         }

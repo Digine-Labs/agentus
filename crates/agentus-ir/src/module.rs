@@ -46,6 +46,26 @@ pub struct AgentMemoryField {
     pub default_idx: Option<u16>,
 }
 
+/// Describes a tool declaration in the module.
+#[derive(Debug, Clone)]
+pub struct ToolDescriptor {
+    /// Index into the constant pool for the tool name.
+    pub name_idx: u16,
+    /// Index into the constant pool for the description string.
+    pub description_idx: Option<u16>,
+    /// Tool parameter descriptors.
+    pub params: Vec<ToolParamDescriptor>,
+}
+
+/// A single parameter in a tool descriptor.
+#[derive(Debug, Clone)]
+pub struct ToolParamDescriptor {
+    /// Index into the constant pool for the parameter name.
+    pub name_idx: u16,
+    /// Index into the constant pool for the default value (optional, simple literals only).
+    pub default_idx: Option<u16>,
+}
+
 /// A compiled module — the output of the compiler, input to the runtime.
 #[derive(Debug, Clone)]
 pub struct Module {
@@ -55,6 +75,8 @@ pub struct Module {
     pub functions: Vec<Function>,
     /// Agent descriptor table.
     pub agents: Vec<AgentDescriptor>,
+    /// Tool descriptor table.
+    pub tools: Vec<ToolDescriptor>,
     /// Index of the entry point function (usually `main` or the top-level script).
     pub entry_function: u32,
 }
@@ -65,6 +87,7 @@ impl Module {
             constants: Vec::new(),
             functions: Vec::new(),
             agents: Vec::new(),
+            tools: Vec::new(),
             entry_function: 0,
         }
     }
@@ -111,6 +134,18 @@ impl Module {
     pub fn get_agent(&self, idx: u32) -> Option<&AgentDescriptor> {
         self.agents.get(idx as usize)
     }
+
+    /// Add a tool descriptor and return its index.
+    pub fn add_tool(&mut self, tool: ToolDescriptor) -> u32 {
+        let idx = self.tools.len();
+        self.tools.push(tool);
+        idx as u32
+    }
+
+    /// Get a tool descriptor by index.
+    pub fn get_tool(&self, idx: u32) -> Option<&ToolDescriptor> {
+        self.tools.get(idx as usize)
+    }
 }
 
 impl Default for Module {
@@ -154,6 +189,10 @@ impl ModuleBuilder {
 
     pub fn add_agent(&mut self, agent: AgentDescriptor) -> u32 {
         self.module.add_agent(agent)
+    }
+
+    pub fn add_tool(&mut self, tool: ToolDescriptor) -> u32 {
+        self.module.add_tool(tool)
     }
 
     pub fn set_entry_function(&mut self, idx: u32) {

@@ -148,6 +148,18 @@ impl Resolver {
                 self.resolve_expr(&fa.object);
                 self.resolve_expr(&fa.value);
             }
+            Stmt::ToolDef(t) => {
+                self.define(&t.name);
+                for param in &t.params {
+                    if let Some(default) = &param.default {
+                        self.resolve_expr(default);
+                    }
+                }
+            }
+            Stmt::Send(s) => {
+                self.resolve_expr(&s.target);
+                self.resolve_expr(&s.message);
+            }
         }
     }
 
@@ -208,6 +220,9 @@ impl Resolver {
             }
             Expr::ExecBlock(prompt, _) => {
                 self.resolve_expr(prompt);
+            }
+            Expr::Recv(target, _) => {
+                self.resolve_expr(target);
             }
         }
     }

@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use agentus_ir::module::{Constant, Module};
 use agentus_ir::opcode::OpCode;
-use crate::host::{ExecRequest, HostInterface, NoHost};
+use crate::host::{ExecRequest, HostInterface, NoHost, ToolCallRequest};
 use crate::value::Value;
 
 /// Output handler for the VM.
@@ -37,6 +37,8 @@ struct AgentInstance {
     descriptor_idx: u32,
     /// Persistent memory fields: field_name -> value.
     memory: HashMap<String, Value>,
+    /// Message mailbox for inter-agent communication.
+    mailbox: VecDeque<Value>,
 }
 
 /// A call frame / activation record.
@@ -618,6 +620,7 @@ impl VM {
                     self.agents.insert(id, AgentInstance {
                         descriptor_idx: bx,
                         memory,
+                        mailbox: VecDeque::new(),
                     });
                     self.set_register(a, Value::AgentHandle(id));
                 }
@@ -638,6 +641,78 @@ impl VM {
                     };
                     let result = self.host.exec(request).map_err(|e| format!("exec error: {}", e))?;
                     self.set_register(a, Value::from_string(result));
+                }
+
+                // Agent message passing
+                OpCode::Send => {
+                    let a = inst.a() as usize;
+                    let b = inst.b() as usize;
+                    let handle = self.get_register(a).clone();
+                    let message = self.get_register(b).clone();
+                    let agent_id = match &handle {
+                        Value::AgentHandle(id) => *id,
+                        _ => return Err(format!("send target is not an agent handle: {}", handle)),
+                    };
+                    let agent = self.agents.get_mut(&agent_id)
+                        .ok_or_else(|| format!("agent {} not found", agent_id))?;
+                    agent.mailbox.push_back(message);
+                }
+                OpCode::Recv => {
+                    let a = inst.a() as usize;
+                    let b = inst.b() as usize;
+                    let handle = self.get_register(b).clone();
+                    let agent_id = match &handle {
+                        Value::AgentHandle(id) => *id,
+                        _ => return Err(format!("recv target is not an agent handle: {}", handle)),
+                    };
+                    let agent = self.agents.get_mut(&agent_id)
+                        .ok_or_else(|| format!("agent {} not found", agent_id))?;
+                    let value = agent.mailbox.pop_front().unwrap_or(Value::None);
+                    self.set_register(a, value);
+                }
+
+                // Tool call
+                OpCode::TCall => {
+                    let result_reg = inst.a() as usize;
+                    let tool_desc_idx = inst.bx() as u32;
+
+                    // Read the extra data word (next instruction)
+                    let frame = self.call_stack.last().unwrap();
+                    let extra_pc = frame.pc;
+                    let func = self.module.get_function(frame.function_idx)
+                        .ok_or("invalid function index")?;
+                    let extra = func.instructions[extra_pc];
+                    self.call_stack.last_mut().unwrap().pc += 1;
+
+                    let first_arg_reg = extra.b() as usize;
+                    let num_args = extra.c() as usize;
+
+                    // Get tool descriptor
+                    let tool_desc = self.module.get_tool(tool_desc_idx)
+                        .ok_or_else(|| format!("tool descriptor {} not found", tool_desc_idx))?
+                        .clone();
+
+                    let tool_name = self.load_constant_str(tool_desc.name_idx)?;
+
+                    // Build named arguments from registers + param names
+                    let mut args = Vec::new();
+                    for i in 0..num_args {
+                        let param_name = if i < tool_desc.params.len() {
+                            self.load_constant_str(tool_desc.params[i].name_idx)?
+                        } else {
+                            format!("arg{}", i)
+                        };
+                        let value = self.get_register(first_arg_reg + i).to_string();
+                        args.push((param_name, value));
+                    }
+
+                    let request = ToolCallRequest {
+                        tool_name,
+                        args,
+                    };
+                    let result = self.host.tool_call(request)
+                        .map_err(|e| format!("tool call error: {}", e))?;
+                    self.set_register(result_reg, Value::from_string(result));
                 }
 
                 // Stubs for not-yet-implemented opcodes
@@ -775,6 +850,7 @@ mod tests {
                 instructions,
             }],
             agents: Vec::new(),
+            tools: Vec::new(),
             entry_function: 0,
         }
     }

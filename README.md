@@ -115,6 +115,24 @@ emit c.increment()    // 3
 emit c.get_count()    // 3
 ```
 
+### Tools
+
+Tools are declaration-only interfaces. The host provides implementations at runtime:
+
+```
+tool get_weather {
+    description { "Get weather for a location" }
+    param location: str
+    param units: str = "celsius"
+    returns str
+}
+
+let weather = get_weather("London")           // units defaults to "celsius"
+let weather2 = get_weather("Tokyo", "fahrenheit")
+emit weather
+emit weather2
+```
+
 ### LLM Execution
 
 The `exec` block sends a prompt to the configured LLM host:
@@ -170,6 +188,7 @@ The `examples/` directory contains sample programs:
 | `while_loop.ags` | While loop |
 | `interpolation.ags` | String interpolation |
 | `agent_basic.ags` | Agent with memory and methods |
+| `tools.ags` | Tool declarations and calls |
 
 Run any example:
 
@@ -184,7 +203,7 @@ cargo run -p agentus-cli -- exec examples/<name>.ags
 | 1 | Done | Vertical slice (let, emit, literals, basic ops) |
 | 2 | Done | Expressions & control flow (if/else, while, for, functions, interpolation) |
 | 3 | Done | Agent core (agent defs, exec blocks, agent memory, method dispatch) |
-| 4 | Planned | Tools (tool declarations, host-provided tool implementations) |
+| 4 | Done | Tools (tool declarations, default params, host-provided tool implementations) |
 | 5 | Planned | Multi-agent (send/recv/wait, cooperative async scheduling) |
 | 6 | Planned | Collections (map literals, map operations) |
 | 7 | Planned | Error handling (try/catch/throw) |

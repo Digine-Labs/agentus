@@ -1,0 +1,23 @@
+// Multi-agent message passing example
+// Demonstrates send/recv between agents
+
+agent Inbox {
+    memory { }
+}
+
+// Create two agents
+let alice = Inbox()
+let bob = Inbox()
+
+// Send messages to each agent's mailbox
+send alice, "Hello from main to Alice"
+send bob, "Hello from main to Bob"
+send alice, "Second message for Alice"
+
+// Receive messages (FIFO order)
+emit recv alice
+emit recv alice
+emit recv bob
+
+// Receive from empty mailbox returns none
+emit recv bob

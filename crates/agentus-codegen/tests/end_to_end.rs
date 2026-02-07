@@ -580,6 +580,172 @@ fn run_with_host(source: &str, host: Box<dyn HostInterface>) -> Vec<String> {
 }
 
 // ===================================================================
+// Tool tests
+// ===================================================================
+
+#[test]
+fn test_tool_basic_call() {
+    let src = r#"
+tool greet {
+    description { "Greet someone" }
+    param name: str
+    returns str
+}
+let result = greet("Alice")
+emit result
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["greet(name=Alice)"]);
+}
+
+#[test]
+fn test_tool_two_params() {
+    let src = r#"
+tool get_weather {
+    description { "Get weather for a location" }
+    param location: str
+    param units: str
+    returns str
+}
+let result = get_weather("London", "celsius")
+emit result
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["get_weather(location=London, units=celsius)"]);
+}
+
+#[test]
+fn test_tool_default_params() {
+    let src = r#"
+tool get_weather {
+    description { "Get weather for a location" }
+    param location: str
+    param units: str = "celsius"
+    returns str
+}
+let result = get_weather("London")
+emit result
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["get_weather(location=London, units=celsius)"]);
+}
+
+#[test]
+fn test_tool_default_override() {
+    let src = r#"
+tool get_weather {
+    description { "Get weather for a location" }
+    param location: str
+    param units: str = "celsius"
+    returns str
+}
+let result = get_weather("New York", "fahrenheit")
+emit result
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["get_weather(location=New York, units=fahrenheit)"]);
+}
+
+#[test]
+fn test_tool_no_description() {
+    let src = r#"
+tool ping {
+    param host: str
+    returns str
+}
+emit ping("localhost")
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["ping(host=localhost)"]);
+}
+
+#[test]
+fn test_tool_with_variable_args() {
+    let src = r#"
+tool send_email {
+    description { "Send an email" }
+    param to: str
+    param subject: str
+    param body: str
+    returns str
+}
+let recipient = "alice@example.com"
+let subj = "Hello"
+let msg = "How are you?"
+emit send_email(recipient, subj, msg)
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["send_email(to=alice@example.com, subject=Hello, body=How are you?)"]);
+}
+
+#[test]
+fn test_tool_multiple_calls() {
+    let src = r#"
+tool add {
+    param a: num
+    param b: num
+    returns num
+}
+emit add(1, 2)
+emit add(10, 20)
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["add(a=1, b=2)", "add(a=10, b=20)"]);
+}
+
+#[test]
+fn test_tool_with_agent() {
+    let src = r#"
+tool get_weather {
+    description { "Get current weather" }
+    param location: str
+    returns str
+}
+
+agent WeatherBot {
+    model = "gpt-4o"
+
+    memory {
+        last_location: str = "unknown"
+    }
+
+    fn check_weather(city: str) -> str {
+        self.last_location = city
+        return get_weather(city)
+    }
+}
+
+let bot = WeatherBot()
+emit bot.check_weather("Tokyo")
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["get_weather(location=Tokyo)"]);
+}
+
+#[test]
+fn test_tool_result_in_variable() {
+    let src = r#"
+tool fetch_data {
+    description { "Fetch data from a source" }
+    param source: str
+    returns str
+}
+let data = fetch_data("database")
+emit "Got: " ++ data
+"#;
+    let out = run_with_host(src, Box::new(EchoHost));
+    assert_eq!(out, vec!["Got: fetch_data(source=database)"]);
+}
+
+#[test]
+fn test_undefined_tool_error() {
+    expect_compile_error(
+        "emit unknown_tool(\"test\")",
+        "undefined function or tool",
+    );
+}
+
+// ===================================================================
 // Agent core tests
 // ===================================================================
 
@@ -765,4 +931,88 @@ emit result
 "#;
     let out = run_with_host(src, Box::new(EchoHost));
     assert_eq!(out, vec!["1", "2", "3", "3", "What is 2+2?"]);
+}
+
+// ===================================================================
+// Phase 5: Send/Recv (agent message passing)
+// ===================================================================
+
+#[test]
+fn test_send_recv_basic() {
+    let src = r#"
+agent Box {
+    memory { }
+}
+let b = Box()
+send b, "hello"
+let msg = recv b
+emit msg
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["hello"]);
+}
+
+#[test]
+fn test_recv_empty() {
+    let src = r#"
+agent Box {
+    memory { }
+}
+let b = Box()
+let msg = recv b
+emit msg
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["none"]);
+}
+
+#[test]
+fn test_send_recv_ordering() {
+    let src = r#"
+agent Box {
+    memory { }
+}
+let b = Box()
+send b, "first"
+send b, "second"
+emit recv b
+emit recv b
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["first", "second"]);
+}
+
+#[test]
+fn test_send_recv_multiple_agents() {
+    let src = r#"
+agent Box {
+    memory { }
+}
+let a = Box()
+let b = Box()
+send a, "for-a"
+send b, "for-b"
+emit recv a
+emit recv b
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["for-a", "for-b"]);
+}
+
+#[test]
+fn test_send_different_types() {
+    let src = r#"
+agent Box {
+    memory { }
+}
+let b = Box()
+send b, 42
+send b, true
+send b, "text"
+emit recv b
+emit recv b
+emit recv b
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["42", "true", "text"]);
 }
