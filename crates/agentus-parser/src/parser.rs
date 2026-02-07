@@ -100,6 +100,22 @@ impl Parser {
                         }));
                     }
                 }
+                // Check for index assignment: expr[key] = value
+                if let Expr::IndexAccess(ref obj, ref index, _) = expr {
+                    if self.current_kind() == TokenKind::Assign {
+                        let start_span = expr.span();
+                        self.advance(); // consume =
+                        let value = self.parse_expression(0)?;
+                        let span = start_span.merge(value.span());
+                        self.expect_statement_end()?;
+                        return Ok(Stmt::IndexAssign(IndexAssignStmt {
+                            object: *obj.clone(),
+                            index: *index.clone(),
+                            value,
+                            span,
+                        }));
+                    }
+                }
                 self.expect_statement_end()?;
                 Ok(Stmt::ExprStmt(expr))
             }
@@ -747,6 +763,31 @@ impl Parser {
                 self.expect(TokenKind::RBracket)?;
                 let span = start.merge(self.prev_span());
                 Ok(Expr::ListLit(elements, span))
+            }
+            TokenKind::LBrace => {
+                // Map literal: { key: value, key: value, ... }
+                let start = self.current_span();
+                self.advance(); // consume {
+                self.skip_newlines();
+                let mut pairs = Vec::new();
+                if self.current_kind() != TokenKind::RBrace {
+                    loop {
+                        self.skip_newlines();
+                        let key = self.parse_expression(0)?;
+                        self.expect(TokenKind::Colon)?;
+                        let value = self.parse_expression(0)?;
+                        pairs.push((key, value));
+                        self.skip_newlines();
+                        if self.current_kind() != TokenKind::Comma {
+                            break;
+                        }
+                        self.advance(); // consume comma
+                    }
+                }
+                self.skip_newlines();
+                self.expect(TokenKind::RBrace)?;
+                let span = start.merge(self.prev_span());
+                Ok(Expr::MapLit(pairs, span))
             }
             _ => Err(format!(
                 "expected expression, found {:?} at {:?}",

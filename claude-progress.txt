@@ -79,9 +79,9 @@ Build:
   cargo build --workspace → OK (clean build)
 
 Tests:
-  cargo test --workspace → 119 tests, ALL PASSING
+  cargo test --workspace → 144 tests, ALL PASSING
     - agentus-cli:     0 tests
-    - agentus-codegen: 4 unit + 71 integration = 75 tests
+    - agentus-codegen: 4 unit + 96 integration = 100 tests
     - agentus-common:  0 tests
     - agentus-ir:      8 tests
     - agentus-lexer:   16 tests
@@ -114,8 +114,7 @@ WHAT IS FAILING OR MISSING
 4. No .agc serialization: `compile` CLI command is a stub.
 5. No type checking in sema: Only name resolution is implemented.
 6. Phase 5 IN PROGRESS — send/recv done, wait/kill/scheduler TODO.
-7. Phases 6-9 not started (collections, error handling, pipelines, polish).
-8. Map literals: Parsed in AST but no codegen/runtime support yet (Phase 6).
+7. Phase 6 DONE. Phases 7-9 not started (error handling, pipelines, polish).
 9. Global memory (GLoad/GStore): Opcodes defined but not implemented.
 
 ======================================================================
@@ -154,6 +153,47 @@ Micro-milestone 1: send/recv (synchronous message passing) — DONE
   - Alternative: skip wait, go to Phase 6 (collections) for more immediate value
 
 ======================================================================
+PHASE 6 PROGRESS — Collections (DONE)
+======================================================================
+
+Implemented 2026-02-07 (session 3)
+
+  What was implemented:
+  - Map literal syntax: `{ "key": value, "key2": value2 }`
+  - Map index get: `map["key"]` → returns value or none
+  - Map index set: `map["key"] = value` → new IndexAssign AST node + IndexSet opcode
+  - Map methods: `.len()`, `.contains(key)`, `.remove(key)`, `.keys()`, `.values()`
+  - Map iteration: `for key in map { ... }` iterates over keys
+  - Built-in `len()` function: works on lists, maps, strings → Len opcode
+  - List `.push(value)` method → ListPush opcode via VM built-in dispatch
+  - List `.len()` method → built-in dispatch
+  - List index set: `list[i] = value` → IndexSet opcode
+  - String `.len()` method → built-in dispatch
+  - Fixed ListLit/MapLit register layout: now uses compile-all-then-copy pattern
+    (same as function call args) to handle complex sub-expressions correctly
+  - 20 new integration tests, 1 new example (collections.ags)
+
+  Design decisions:
+  - Map keys are strings at runtime (Value::Map uses HashMap<String, Value>)
+  - Map literal keys can be any expression; converted to string at VM level
+  - Built-in collection methods (push, len, contains, remove, keys, values) are
+    dispatched at runtime in the VM's method call handler — no new opcodes needed
+  - `len()` is a compile-time built-in function → Len opcode (not a method call)
+  - IterInit extended to support maps (iterates over keys as strings)
+  - Map display format: {"key": value, "key2": value2}
+
+  Files changed:
+  - ast.rs: +IndexAssignStmt, +Stmt::IndexAssign
+  - parser.rs: +map literal in parse_primary(), +index assign in parse_statement()
+  - resolver.rs: +Stmt::IndexAssign resolution
+  - compiler.rs: +MapLit → NewMap, +IndexAssign → IndexSet, +len() built-in,
+    fixed ListLit/MapLit to use compile-all-then-copy pattern
+  - vm.rs: +NewMap handler, +built-in method dispatch for List/Map/String,
+    +map iteration in IterInit
+  - end_to_end.rs: +20 tests
+  - examples/collections.ags: new example
+
+======================================================================
 NEXT STEPS (prioritized)
 ======================================================================
 
@@ -163,7 +203,7 @@ NEXT STEPS (prioritized)
    c. TODO: Cooperative yield at Exec, TCall, Recv, Wait points
    d. TODO: Kill opcode
    e. TODO: RecvTimeout
-2. [PHASE 6] Collections — map literals and operations
+2. [PHASE 6] Collections — DONE
 3. [PHASE 7] Error handling — try/catch/throw
 4. [PHASE 8] Pipelines — pipeline/stage syntax
 5. [PHASE 9] Polish — .agc serialization, error messages, LSP
@@ -187,30 +227,17 @@ OPEN QUESTIONS / RISKS
   means type errors surface at runtime, which may be acceptable for a DSL.
 
 ======================================================================
-LAST VERIFICATION (2026-02-07, session 2)
+LAST VERIFICATION (2026-02-07, session 3)
 ======================================================================
 
 $ cargo build --workspace
   → OK
 
 $ cargo test --workspace
-  → 124 tests, 0 failures (+5 from send/recv)
+  → 144 tests, 0 failures (+20 from collections)
 
-$ cargo run -p agentus-cli -- exec examples/hello.ags
-  → "Hello Agentus!" ✓
+$ make smoke
+  → PASSED
 
-$ cargo run -p agentus-cli -- exec examples/agent_basic.ags
-  → "1" / "2" / "3" / "3" / "What is 2+2?" ✓
-
-$ cargo run -p agentus-cli -- exec examples/multi_agent.ags
-  → "Hello from main to Alice" / "Second message for Alice" /
-    "Hello from main to Bob" / "none" ✓
-
-$ cargo run -p agentus-cli -- exec examples/tools.ags
-  → Tool call output with params ✓
-
-$ cargo run -p agentus-cli -- exec examples/functions.ags
-  → "42" / "Hello, Agentus!" ✓
-
-$ cargo run -p agentus-cli -- exec examples/interpolation.ags
-  → "Hello, World!" / "The sum of 10 and 32 is 42" / "Double of 10 is 20" ✓
+$ cargo run -p agentus-cli -- exec examples/collections.ags
+  → Map/list operations all correct ✓

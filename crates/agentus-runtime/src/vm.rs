@@ -352,8 +352,84 @@ impl VM {
 
                         let method_name = self.load_constant_str(method_name_idx)?;
 
-                        // r(first_arg_reg) is the agent handle
+                        // r(first_arg_reg) is the receiver
                         let handle = self.get_register(first_arg_reg).clone();
+
+                        // Built-in collection methods
+                        match &handle {
+                            Value::List(list) => {
+                                match method_name.as_str() {
+                                    "push" => {
+                                        if num_args < 2 {
+                                            return Err("list.push() requires an argument".to_string());
+                                        }
+                                        let val = self.get_register(first_arg_reg + 1).clone();
+                                        list.borrow_mut().push(val);
+                                        self.set_register(result_reg as usize, Value::None);
+                                        continue;
+                                    }
+                                    "len" => {
+                                        let len = list.borrow().len();
+                                        self.set_register(result_reg as usize, Value::Num(len as f64));
+                                        continue;
+                                    }
+                                    _ => return Err(format!("unknown list method '{}'", method_name)),
+                                }
+                            }
+                            Value::Map(map) => {
+                                match method_name.as_str() {
+                                    "len" => {
+                                        let len = map.borrow().len();
+                                        self.set_register(result_reg as usize, Value::Num(len as f64));
+                                        continue;
+                                    }
+                                    "keys" => {
+                                        let keys: Vec<Value> = map.borrow().keys()
+                                            .map(|k| Value::from_str(k))
+                                            .collect();
+                                        self.set_register(result_reg as usize, Value::List(std::rc::Rc::new(std::cell::RefCell::new(keys))));
+                                        continue;
+                                    }
+                                    "values" => {
+                                        let vals: Vec<Value> = map.borrow().values()
+                                            .cloned()
+                                            .collect();
+                                        self.set_register(result_reg as usize, Value::List(std::rc::Rc::new(std::cell::RefCell::new(vals))));
+                                        continue;
+                                    }
+                                    "contains" => {
+                                        if num_args < 2 {
+                                            return Err("map.contains() requires an argument".to_string());
+                                        }
+                                        let key = self.get_register(first_arg_reg + 1).to_string();
+                                        let has = map.borrow().contains_key(&key);
+                                        self.set_register(result_reg as usize, Value::Bool(has));
+                                        continue;
+                                    }
+                                    "remove" => {
+                                        if num_args < 2 {
+                                            return Err("map.remove() requires an argument".to_string());
+                                        }
+                                        let key = self.get_register(first_arg_reg + 1).to_string();
+                                        let removed = map.borrow_mut().remove(&key).unwrap_or(Value::None);
+                                        self.set_register(result_reg as usize, removed);
+                                        continue;
+                                    }
+                                    _ => return Err(format!("unknown map method '{}'", method_name)),
+                                }
+                            }
+                            Value::Str(s) => {
+                                match method_name.as_str() {
+                                    "len" => {
+                                        self.set_register(result_reg as usize, Value::Num(s.len() as f64));
+                                        continue;
+                                    }
+                                    _ => return Err(format!("unknown string method '{}'", method_name)),
+                                }
+                            }
+                            _ => {}
+                        }
+
                         let agent_id = match &handle {
                             Value::AgentHandle(id) => *id,
                             _ => return Err(format!("method call on non-agent: {}", handle)),
@@ -452,6 +528,16 @@ impl VM {
                     }
                     self.set_register(a, Value::List(std::rc::Rc::new(std::cell::RefCell::new(items))));
                 }
+                OpCode::NewMap => {
+                    let (a, b, c) = (inst.a() as usize, inst.b() as usize, inst.c() as usize);
+                    let mut map = std::collections::HashMap::new();
+                    for i in 0..c {
+                        let key = self.get_register(b + i * 2).to_string();
+                        let val = self.get_register(b + i * 2 + 1).clone();
+                        map.insert(key, val);
+                    }
+                    self.set_register(a, Value::Map(std::rc::Rc::new(std::cell::RefCell::new(map))));
+                }
                 OpCode::IndexGet => {
                     let (a, b, c) = (inst.a() as usize, inst.b() as usize, inst.c() as usize);
                     let obj = self.get_register(b).clone();
@@ -527,6 +613,10 @@ impl VM {
                     let source = self.get_register(b).clone();
                     let items = match &source {
                         Value::List(l) => l.borrow().clone(),
+                        Value::Map(m) => {
+                            // Iterate over keys
+                            m.borrow().keys().map(|k| Value::from_str(k)).collect()
+                        }
                         _ => return Err(format!("cannot iterate over {:?}", source)),
                     };
                     self.set_register(

@@ -258,27 +258,47 @@ Status key: `[x]` = DONE (verified), `[ ]` = NOT DONE, `[~]` = PARTIAL
 
 ---
 
-## Phase 6: Collections (TODO)
+## Phase 6: Collections (DONE)
 
 ### Map Operations
-- [ ] Map literal syntax (`{ "key": value, ... }`)
-  - Verify: TBD (AST parsing exists: `MapLit`)
-- [ ] NewMap opcode in codegen
-  - Verify: TBD
-- [ ] NewMap opcode in runtime
-  - Verify: TBD
-- [ ] Map index get (`map["key"]`)
-  - Verify: TBD
-- [ ] Map index set (`map["key"] = value`)
-  - Verify: TBD
-- [ ] Map `len()`
-  - Verify: TBD
+- [x] Map literal syntax (`{ "key": value, ... }`)
+  - Verify: `cargo test --workspace -- test_map_literal_basic`
+- [x] NewMap opcode in codegen
+  - Verify: `cargo test --workspace -- test_map_literal_basic`
+- [x] NewMap opcode in runtime
+  - Verify: `cargo test --workspace -- test_map_literal_basic`
+- [x] Map index get (`map["key"]`)
+  - Verify: `cargo test --workspace -- test_map_literal_basic`
+- [x] Map index set (`map["key"] = value`)
+  - Verify: `cargo test --workspace -- test_map_index_set`
+- [x] Map `len()` (built-in function)
+  - Verify: `cargo test --workspace -- test_map_len`
+- [x] Map `.len()` method
+  - Verify: `cargo test --workspace -- test_map_method_len`
+- [x] Map `.contains()` method
+  - Verify: `cargo test --workspace -- test_map_method_contains`
+- [x] Map `.remove()` method
+  - Verify: `cargo test --workspace -- test_map_method_remove`
+- [x] Map `.keys()` method
+  - Verify: `cargo test --workspace -- test_map_method_keys`
+- [x] Map `.values()` method
+  - Verify: `cargo test --workspace -- test_map_method_values`
+- [x] Map iteration (`for key in map`)
+  - Verify: `cargo test --workspace -- test_map_for_iteration`
 
 ### List Enhancements
-- [ ] List `push()` method
-  - Verify: TBD (ListPush opcode exists but may not be exposed in language)
-- [ ] List index set (`list[i] = value`)
-  - Verify: TBD
+- [x] List `push()` method
+  - Verify: `cargo test --workspace -- test_list_push`
+- [x] List index set (`list[i] = value`)
+  - Verify: `cargo test --workspace -- test_list_index_set`
+- [x] List `.len()` method
+  - Verify: `cargo test --workspace -- test_list_method_len`
+- [x] `len()` built-in function (lists, maps, strings)
+  - Verify: `cargo test --workspace -- test_list_len`
+
+### Collection Examples
+- [x] Collections example
+  - Verify: `cargo run -p agentus-cli -- exec examples/collections.ags`
 
 ---
 

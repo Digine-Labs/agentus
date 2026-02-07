@@ -160,6 +160,11 @@ impl Resolver {
                 self.resolve_expr(&s.target);
                 self.resolve_expr(&s.message);
             }
+            Stmt::IndexAssign(ia) => {
+                self.resolve_expr(&ia.object);
+                self.resolve_expr(&ia.index);
+                self.resolve_expr(&ia.value);
+            }
         }
     }
 

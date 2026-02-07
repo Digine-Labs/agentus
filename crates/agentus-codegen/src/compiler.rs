@@ -142,6 +142,13 @@ impl<'a> FunctionEmitter<'a> {
                 self.emit(Instruction::abc(OpCode::Send, target_reg, msg_reg, 0));
                 Ok(())
             }
+            Stmt::IndexAssign(ia) => {
+                let obj_reg = self.compile_expr(&ia.object)?;
+                let idx_reg = self.compile_expr(&ia.index)?;
+                let val_reg = self.compile_expr(&ia.value)?;
+                self.emit(Instruction::abc(OpCode::IndexSet, obj_reg, idx_reg, val_reg));
+                Ok(())
+            }
             Stmt::FieldAssign(fa) => {
                 let val_reg = self.compile_expr(&fa.value)?;
                 // Only self.field = expr is supported
@@ -523,6 +530,17 @@ impl<'a> FunctionEmitter<'a> {
                 Ok(result_reg)
             }
             Expr::FnCall(name, args, _) => {
+                // Built-in functions
+                if name == "len" {
+                    if args.len() != 1 {
+                        return Err("len() takes exactly 1 argument".to_string());
+                    }
+                    let arg_reg = self.compile_expr(&args[0])?;
+                    let result_reg = self.alloc_register();
+                    self.emit(Instruction::abc(OpCode::Len, result_reg, arg_reg, 0));
+                    return Ok(result_reg);
+                }
+
                 // Check agent_table first (agent instantiation)
                 let agent_idx = self
                     .agent_table
@@ -691,9 +709,18 @@ impl<'a> FunctionEmitter<'a> {
                 Ok(result_reg)
             }
             Expr::ListLit(elems, _) => {
-                let first_reg = self.next_register;
+                // Compile all elements first (may use non-consecutive registers)
+                let mut elem_regs = Vec::new();
                 for elem in elems {
-                    self.compile_expr(elem)?;
+                    elem_regs.push(self.compile_expr(elem)?);
+                }
+                // Copy to consecutive registers
+                let first_reg = self.next_register;
+                for &src in &elem_regs {
+                    let dest = self.alloc_register();
+                    if src != dest {
+                        self.emit(Instruction::abc(OpCode::Move, dest, src, 0));
+                    }
                 }
                 let result_reg = self.alloc_register();
                 self.emit(Instruction::abc(
@@ -704,8 +731,34 @@ impl<'a> FunctionEmitter<'a> {
                 ));
                 Ok(result_reg)
             }
-            Expr::MapLit(_, _) => {
-                Err("map literals not yet implemented".to_string())
+            Expr::MapLit(pairs, _) => {
+                // Compile all keys and values first (may use non-consecutive registers)
+                let mut kv_regs = Vec::new();
+                for (key, value) in pairs {
+                    let k = self.compile_expr(key)?;
+                    let v = self.compile_expr(value)?;
+                    kv_regs.push((k, v));
+                }
+                // Copy to consecutive registers: key0, val0, key1, val1, ...
+                let first_kv_reg = self.next_register;
+                for (k, v) in &kv_regs {
+                    let k_dest = self.alloc_register();
+                    if *k != k_dest {
+                        self.emit(Instruction::abc(OpCode::Move, k_dest, *k, 0));
+                    }
+                    let v_dest = self.alloc_register();
+                    if *v != v_dest {
+                        self.emit(Instruction::abc(OpCode::Move, v_dest, *v, 0));
+                    }
+                }
+                let result_reg = self.alloc_register();
+                self.emit(Instruction::abc(
+                    OpCode::NewMap,
+                    result_reg,
+                    first_kv_reg,
+                    pairs.len() as u8,
+                ));
+                Ok(result_reg)
             }
             Expr::ExecBlock(prompt, _) => {
                 let prompt_reg = self.compile_expr(prompt)?;

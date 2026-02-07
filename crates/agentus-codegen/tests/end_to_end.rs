@@ -1016,3 +1016,239 @@ emit recv b
     let out = run(src);
     assert_eq!(out, vec!["42", "true", "text"]);
 }
+
+// ===================================================================
+// Phase 6: Collections (maps and list enhancements)
+// ===================================================================
+
+#[test]
+fn test_map_literal_empty() {
+    let src = r#"
+let m = {}
+emit m
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["{}"]);
+}
+
+#[test]
+fn test_map_literal_basic() {
+    let src = r#"
+let m = {"name": "Alice", "age": 30}
+emit m["name"]
+emit m["age"]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["Alice", "30"]);
+}
+
+#[test]
+fn test_map_index_get_missing() {
+    let src = r#"
+let m = {"a": 1}
+emit m["b"]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["none"]);
+}
+
+#[test]
+fn test_map_index_set() {
+    let src = r#"
+let m = {"x": 10}
+m["x"] = 20
+m["y"] = 30
+emit m["x"]
+emit m["y"]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["20", "30"]);
+}
+
+#[test]
+fn test_map_len() {
+    let src = r#"
+let m = {"a": 1, "b": 2, "c": 3}
+emit len(m)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["3"]);
+}
+
+#[test]
+fn test_map_method_len() {
+    let src = r#"
+let m = {"a": 1, "b": 2}
+emit m.len()
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["2"]);
+}
+
+#[test]
+fn test_map_method_contains() {
+    let src = r#"
+let m = {"name": "Alice"}
+emit m.contains("name")
+emit m.contains("age")
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["true", "false"]);
+}
+
+#[test]
+fn test_map_method_remove() {
+    let src = r#"
+let m = {"a": 1, "b": 2}
+let removed = m.remove("a")
+emit removed
+emit len(m)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["1", "1"]);
+}
+
+#[test]
+fn test_map_method_keys() {
+    let src = r#"
+let m = {"x": 10}
+let ks = m.keys()
+emit len(ks)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["1"]);
+}
+
+#[test]
+fn test_map_method_values() {
+    let src = r#"
+let m = {"x": 10}
+let vs = m.values()
+emit len(vs)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["1"]);
+}
+
+#[test]
+fn test_map_for_iteration() {
+    let src = r#"
+let m = {"only": 42}
+for key in m {
+    emit key
+    emit m[key]
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["only", "42"]);
+}
+
+#[test]
+fn test_list_push() {
+    let src = r#"
+let items = [1, 2, 3]
+items.push(4)
+items.push(5)
+emit len(items)
+emit items[3]
+emit items[4]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["5", "4", "5"]);
+}
+
+#[test]
+fn test_list_index_set() {
+    let src = r#"
+let items = [10, 20, 30]
+items[1] = 99
+emit items[0]
+emit items[1]
+emit items[2]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["10", "99", "30"]);
+}
+
+#[test]
+fn test_list_len() {
+    let src = r#"
+let items = [1, 2, 3, 4]
+emit len(items)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["4"]);
+}
+
+#[test]
+fn test_list_method_len() {
+    let src = r#"
+let items = [1, 2, 3]
+emit items.len()
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["3"]);
+}
+
+#[test]
+fn test_string_len() {
+    let src = r#"
+let s = "hello"
+emit len(s)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["5"]);
+}
+
+#[test]
+fn test_map_with_expressions() {
+    let src = r#"
+let x = 10
+let m = {"value": x + 5, "double": x * 2}
+emit m["value"]
+emit m["double"]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["15", "20"]);
+}
+
+#[test]
+fn test_nested_collections() {
+    let src = r#"
+let outer = [1, 2, 3]
+let m = {"items": outer, "count": 3}
+emit m["count"]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["3"]);
+}
+
+#[test]
+fn test_map_in_loop() {
+    let src = r#"
+let items = [{"name": "a"}, {"name": "b"}, {"name": "c"}]
+for item in items {
+    emit item["name"]
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn test_collection_build_in_loop() {
+    let src = r#"
+let result = []
+let i = 0
+while i < 3 {
+    result.push(i * 10)
+    i = i + 1
+}
+emit result[0]
+emit result[1]
+emit result[2]
+emit len(result)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["0", "10", "20", "3"]);
+}

@@ -1,0 +1,50 @@
+// Collections example: maps and list operations
+
+// Map literal
+let user = {"name": "Alice", "age": 30, "role": "engineer"}
+emit "Name: " ++ user["name"]
+emit "Age: " ++ user["age"]
+emit "Role: " ++ user["role"]
+
+// Map mutation
+user["level"] = "senior"
+emit "Level: " ++ user["level"]
+emit "Fields: " ++ len(user)
+
+// Map methods
+emit "Has name: " ++ user.contains("name")
+emit "Has email: " ++ user.contains("email")
+
+// List with push
+let scores = [90, 85, 92]
+scores.push(88)
+scores.push(95)
+emit "Scores: " ++ scores
+emit "Count: " ++ len(scores)
+
+// List index set
+scores[0] = 100
+emit "Updated first: " ++ scores[0]
+
+// Map iteration
+let config = {"host": "localhost", "port": "8080"}
+for key in config {
+    emit key ++ " = " ++ config[key]
+}
+
+// Building a list in a loop
+let evens = []
+let i = 0
+while i < 10 {
+    if i % 2 == 0 {
+        evens.push(i)
+    }
+    i = i + 1
+}
+emit "Evens: " ++ evens
+
+// Map with computed values
+let x = 5
+let computed = {"square": x * x, "double": x * 2, "plus_one": x + 1}
+emit "Square: " ++ computed["square"]
+emit "Double: " ++ computed["double"]

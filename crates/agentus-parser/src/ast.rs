@@ -36,6 +36,8 @@ pub enum Stmt {
     ToolDef(ToolDef),
     /// Send message: `send target, message`
     Send(SendStmt),
+    /// Index assignment: `collection[key] = value`
+    IndexAssign(IndexAssignStmt),
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +120,14 @@ pub struct FieldAssignStmt {
 pub struct SendStmt {
     pub target: Expr,
     pub message: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexAssignStmt {
+    pub object: Expr,
+    pub index: Expr,
+    pub value: Expr,
     pub span: Span,
 }
 
