@@ -302,16 +302,61 @@ Status key: `[x]` = DONE (verified), `[ ]` = NOT DONE, `[~]` = PARTIAL
 
 ---
 
-## Phase 7: Error Handling (TODO)
+## Phase 7: Error Handling + Resilience + JSON (DONE)
 
-- [ ] `try` block (TryBegin/TryEnd opcodes)
-  - Verify: TBD
-- [ ] `catch` block
-  - Verify: TBD
-- [ ] `throw` statement (Throw opcode)
-  - Verify: TBD
-- [ ] Error value access (GetError opcode)
-  - Verify: TBD
+### Try/Catch/Throw
+- [x] `try` block (TryBegin/TryEnd opcodes)
+  - Verify: `cargo test --workspace -- test_try_catch_basic`
+- [x] `catch` block with error variable
+  - Verify: `cargo test --workspace -- test_try_catch_basic`
+- [x] `throw` statement (Throw opcode)
+  - Verify: `cargo test --workspace -- test_throw_unhandled`
+- [x] Error value access (GetError opcode)
+  - Verify: `cargo test --workspace -- test_try_catch_basic`
+- [x] Nested try/catch
+  - Verify: `cargo test --workspace -- test_nested_try_catch`
+- [x] Throw from inside functions (call stack unwinding)
+  - Verify: `cargo test --workspace -- test_try_catch_in_function`
+- [x] Try/catch normal (no error) path
+  - Verify: `cargo test --workspace -- test_try_catch_no_error`
+
+### Assert
+- [x] `assert condition` (default message)
+  - Verify: `cargo test --workspace -- test_assert_fail_default_message`
+- [x] `assert condition, "message"` (custom message)
+  - Verify: `cargo test --workspace -- test_assert_fail_custom_message`
+- [x] Assert passing (no error)
+  - Verify: `cargo test --workspace -- test_assert_pass`
+- [x] Assert caught by try/catch
+  - Verify: `cargo test --workspace -- test_assert_caught_by_try`
+- [x] Assert with expressions
+  - Verify: `cargo test --workspace -- test_assert_with_expression`
+
+### Retry
+- [x] `retry N { body }` expression
+  - Verify: `cargo test --workspace -- test_retry_no_error`
+- [x] Retry with error recovery
+  - Verify: `cargo test --workspace -- test_retry_with_counter`
+- [x] Retry exhausted (re-throws last error)
+  - Verify: `cargo test --workspace -- test_retry_exhausted`
+- [x] Retry with assert
+  - Verify: `cargo test --workspace -- test_retry_with_assert`
+
+### JSON Built-ins
+- [x] `parse_json(str)` — parse JSON string into Value
+  - Verify: `cargo test --workspace -- test_parse_json_object`
+- [x] `to_json(value)` — serialize Value to JSON string
+  - Verify: `cargo test --workspace -- test_to_json_list`
+- [x] JSON parse error throws (catchable)
+  - Verify: `cargo test --workspace -- test_parse_json_error_caught`
+- [x] JSON roundtrip (to_json + parse_json)
+  - Verify: `cargo test --workspace -- test_parse_json_roundtrip`
+- [x] Nested JSON objects/arrays
+  - Verify: `cargo test --workspace -- test_parse_json_nested`
+
+### Error Handling Examples
+- [x] Error handling example
+  - Verify: `cargo run -p agentus-cli -- exec examples/error_handling.ags`
 
 ---
 

@@ -110,6 +110,10 @@ pub enum OpCode {
     Len = 0x5C,
     /// Push to list: r(A).push(r(B))
     ListPush = 0x5D,
+    /// Parse JSON string: r(A) = parse_json(r(B))
+    ParseJson = 0x5E,
+    /// Serialize to JSON: r(A) = to_json(r(B))
+    ToJson = 0x5F,
 
     // =====================================================================
     // CONTROL FLOW
@@ -258,6 +262,8 @@ impl OpCode {
             0x5B => Some(Self::IndexSet),
             0x5C => Some(Self::Len),
             0x5D => Some(Self::ListPush),
+            0x5E => Some(Self::ParseJson),
+            0x5F => Some(Self::ToJson),
 
             0x60 => Some(Self::Jmp),
             0x61 => Some(Self::JmpTrue),

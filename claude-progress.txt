@@ -1,7 +1,7 @@
 ======================================================================
 AGENTUS — SESSION PROGRESS LOG
 ======================================================================
-Last updated: 2026-02-07 (Harness Architect session)
+Last updated: 2026-02-07 (Phase 7 Error Handling session)
 
 ======================================================================
 CURRENT STATUS BY PIPELINE STAGE
@@ -79,9 +79,9 @@ Build:
   cargo build --workspace → OK (clean build)
 
 Tests:
-  cargo test --workspace → 144 tests, ALL PASSING
+  cargo test --workspace → 173 tests, ALL PASSING
     - agentus-cli:     0 tests
-    - agentus-codegen: 4 unit + 96 integration = 100 tests
+    - agentus-codegen: 4 unit + 125 integration = 129 tests
     - agentus-common:  0 tests
     - agentus-ir:      8 tests
     - agentus-lexer:   16 tests
@@ -90,11 +90,13 @@ Tests:
     - agentus-sema:    5 tests
 
 Examples (all verified working):
-  hello.ags         → "Hello Agentus!"
-  functions.ags     → "42" / "Hello, Agentus!"
-  interpolation.ags → "Hello, World!" / "The sum of 10 and 32 is 42" / "Double of 10 is 20"
-  agent_basic.ags   → "1" / "2" / "3" / "3" / "What is 2+2?" (EchoHost)
-  tools.ags         → formatted tool calls with params
+  hello.ags           → "Hello Agentus!"
+  functions.ags       → "42" / "Hello, Agentus!"
+  interpolation.ags   → "Hello, World!" / "The sum of 10 and 32 is 42" / ...
+  agent_basic.ags     → "1" / "2" / "3" / "3" / "What is 2+2?" (EchoHost)
+  tools.ags           → formatted tool calls with params
+  collections.ags     → map/list operations
+  error_handling.ags  → try/catch, assert, retry, parse_json, to_json
 
 Formatting:
   cargo fmt --check → FAILS (cosmetic formatting diffs in compiler.rs, vm.rs, etc.)
@@ -114,8 +116,10 @@ WHAT IS FAILING OR MISSING
 4. No .agc serialization: `compile` CLI command is a stub.
 5. No type checking in sema: Only name resolution is implemented.
 6. Phase 5 IN PROGRESS — send/recv done, wait/kill/scheduler TODO.
-7. Phase 6 DONE. Phases 7-9 not started (error handling, pipelines, polish).
-9. Global memory (GLoad/GStore): Opcodes defined but not implemented.
+7. Phase 6 DONE (Collections).
+8. Phase 7 DONE (Error Handling + Resilience + JSON).
+9. Phases 8-9 not started (pipelines, polish).
+10. Global memory (GLoad/GStore): Opcodes defined but not implemented.
 
 ======================================================================
 PHASE 5 PROGRESS — Multi-Agent
@@ -194,6 +198,68 @@ Implemented 2026-02-07 (session 3)
   - examples/collections.ags: new example
 
 ======================================================================
+PHASE 7 PROGRESS — Error Handling + Resilience + JSON (DONE)
+======================================================================
+
+Implemented 2026-02-07 (Phase 7 session)
+
+  What was implemented:
+  - try/catch/throw: Full error handling with VM error handler stack
+    - `try { body } catch varname { handler }` syntax
+    - `throw expr` statement — throws any value as an error
+    - Nested try/catch works correctly (handler stack)
+    - Throw from inside functions unwinds call stack to nearest handler
+    - Unhandled throws propagate as runtime errors
+  - assert: `assert condition` or `assert condition, "message"`
+    - Compiles to JmpTrue + Throw internally
+    - Default message: "assertion failed"
+    - Caught by surrounding try/catch blocks
+  - retry: `retry N { body }` expression
+    - Executes body, catches errors, retries up to N times
+    - Returns the value of the last ExprStmt in the body on success
+    - Re-throws the last error if all retries are exhausted
+    - Works with assert, throw, parse_json errors
+  - parse_json(str): Built-in function to parse JSON strings into Values
+    - JSON objects → Value::Map, arrays → Value::List
+    - JSON strings/numbers/bools/null → Value::Str/Num/Bool/None
+    - Throws on invalid JSON (catchable by try/catch)
+    - Full recursive descent JSON parser, no external deps
+  - to_json(value): Built-in function to serialize Values to JSON strings
+    - Handles maps, lists, strings, numbers, bools, none
+    - Proper string escaping (quotes, backslashes, newlines)
+  - 29 new integration tests, 1 new example (error_handling.ags)
+
+  Opcodes used:
+  - TryBegin (0x98): Push error handler at PC + sBx offset
+  - TryEnd (0x99): Pop error handler (normal completion)
+  - Throw (0x9A): Throw r(A) as error, unwind to nearest handler
+  - GetError (0x9B): Load current error into r(A)
+  - ParseJson (0x5E): r(A) = parse_json(r(B))
+  - ToJson (0x5F): r(A) = to_json(r(B))
+
+  VM error handling model:
+  - error_handlers: Vec<ErrorHandler> stack
+  - TryBegin pushes handler with catch_pc and call_stack_depth
+  - Throw pops handler, unwinds call stack, sets PC to catch_pc
+  - If no handler exists, Throw returns Err (terminates program)
+  - GetError reads current_error (set by last Throw)
+
+  Files changed:
+  - token.rs: +Assert, +Retry tokens and keyword mappings
+  - ast.rs: +TryCatchStmt, +ThrowStmt, +AssertStmt, +Expr::Retry
+  - parser.rs: +parse_try_catch(), +parse_throw(), +parse_assert(), +retry in parse_primary
+  - resolver.rs: +TryCatch, +Throw, +Assert, +Retry resolution
+  - opcode.rs: +ParseJson (0x5E), +ToJson (0x5F) opcodes
+  - compiler.rs: +compile_try_catch(), +compile_assert(), +Throw, +Retry,
+    +parse_json/to_json built-in functions
+  - value.rs: +to_json() method, +parse_json() static method,
+    +full JSON parser (recursive descent, no deps)
+  - vm.rs: +ErrorHandler struct, +error_handlers stack, +current_error field,
+    +TryBegin/TryEnd/Throw/GetError/ParseJson/ToJson handlers, +throw_error()
+  - end_to_end.rs: +29 tests, +run_error() helper
+  - examples/error_handling.ags: new example
+
+======================================================================
 NEXT STEPS (prioritized)
 ======================================================================
 
@@ -204,10 +270,12 @@ NEXT STEPS (prioritized)
    d. TODO: Kill opcode
    e. TODO: RecvTimeout
 2. [PHASE 6] Collections — DONE
-3. [PHASE 7] Error handling — try/catch/throw
-4. [PHASE 8] Pipelines — pipeline/stage syntax
-5. [PHASE 9] Polish — .agc serialization, error messages, LSP
-6. [STABILIZATION] Run `cargo fmt --all` to fix formatting
+3. [PHASE 7] Error Handling + Resilience + JSON — DONE
+4. [HARNESS FEATURES] String utilities (split, join, trim, contains, starts_with)
+5. [HARNESS FEATURES] Timeout expression
+6. [PHASE 8] Pipelines — pipeline/stage syntax (or pipe operator)
+7. [PHASE 9] Polish — .agc serialization, error messages, LSP
+8. [STABILIZATION] Run `cargo fmt --all` to fix formatting
 7. [STABILIZATION] Fix clippy warnings (all are auto-fixable)
 
 ======================================================================
@@ -227,17 +295,14 @@ OPEN QUESTIONS / RISKS
   means type errors surface at runtime, which may be acceptable for a DSL.
 
 ======================================================================
-LAST VERIFICATION (2026-02-07, session 3)
+LAST VERIFICATION (2026-02-07, Phase 7 session)
 ======================================================================
 
 $ cargo build --workspace
-  → OK
+  → OK (clean)
 
 $ cargo test --workspace
-  → 144 tests, 0 failures (+20 from collections)
+  → 173 tests, 0 failures (+29 from Phase 7)
 
-$ make smoke
-  → PASSED
-
-$ cargo run -p agentus-cli -- exec examples/collections.ags
-  → Map/list operations all correct ✓
+$ cargo run -p agentus-cli -- exec examples/error_handling.ags
+  → try/catch, assert, retry, parse_json, to_json all correct ✓

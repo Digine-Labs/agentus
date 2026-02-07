@@ -165,6 +165,28 @@ impl Resolver {
                 self.resolve_expr(&ia.index);
                 self.resolve_expr(&ia.value);
             }
+            Stmt::TryCatch(tc) => {
+                self.push_scope();
+                for s in &tc.try_body {
+                    self.resolve_stmt(s);
+                }
+                self.pop_scope();
+                self.push_scope();
+                self.define(&tc.catch_var);
+                for s in &tc.catch_body {
+                    self.resolve_stmt(s);
+                }
+                self.pop_scope();
+            }
+            Stmt::Throw(t) => {
+                self.resolve_expr(&t.value);
+            }
+            Stmt::Assert(a) => {
+                self.resolve_expr(&a.condition);
+                if let Some(msg) = &a.message {
+                    self.resolve_expr(msg);
+                }
+            }
         }
     }
 
@@ -228,6 +250,14 @@ impl Resolver {
             }
             Expr::Recv(target, _) => {
                 self.resolve_expr(target);
+            }
+            Expr::Retry(attempts, body, _) => {
+                self.resolve_expr(attempts);
+                self.push_scope();
+                for s in body {
+                    self.resolve_stmt(s);
+                }
+                self.pop_scope();
             }
         }
     }

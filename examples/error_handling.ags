@@ -1,0 +1,61 @@
+// Error Handling Example — try/catch/throw, assert, retry, parse_json
+
+// --- Basic try/catch ---
+try {
+    emit "attempting risky operation..."
+    throw "something went wrong"
+    emit "this never runs"
+} catch err {
+    emit "caught: " ++ err
+}
+
+// --- Assert ---
+let x = 42
+assert x > 0, "x must be positive"
+emit "assertion passed"
+
+// --- Function that throws ---
+fn safe_divide(a: num, b: num) -> num {
+    if b == 0 {
+        throw "division by zero"
+    }
+    return a / b
+}
+
+try {
+    let result = safe_divide(10, 0)
+} catch err {
+    emit "caught: " ++ err
+}
+
+let result = safe_divide(10, 2)
+emit "10 / 2 = " ++ "{result}"
+
+// --- Retry with assert ---
+let attempt = 0
+try {
+    let val = retry 5 {
+        attempt = attempt + 1
+        assert attempt >= 3, "not ready yet"
+        attempt
+    }
+    emit "succeeded on attempt " ++ "{val}"
+} catch err {
+    emit "all retries failed: " ++ err
+}
+
+// --- parse_json / to_json ---
+let data = {"name": "Alice", "scores": [95, 87, 92]}
+let json = to_json(data)
+emit "JSON: " ++ json
+
+let parsed = parse_json("[1, 2, 3]")
+emit "parsed list length: " ++ "{len(parsed)}"
+emit "first element: " ++ "{parsed[0]}"
+
+// --- Error handling with JSON parsing ---
+try {
+    let bad = parse_json("not valid json")
+} catch err {
+    emit "JSON parse error caught"
+}

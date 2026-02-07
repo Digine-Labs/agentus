@@ -23,6 +23,21 @@ fn run_values(source: &str) -> Vec<Value> {
     vm.get_outputs().to_vec()
 }
 
+/// Helper: compile source, run VM, expect a runtime error containing the given substring.
+fn run_error(source: &str, expected: &str) {
+    let module = compile(source).unwrap_or_else(|e| panic!("compile error: {}", e));
+    let mut vm = VM::new(module).with_output(Box::new(SilentHandler));
+    let result = vm.run();
+    assert!(result.is_err(), "expected runtime error, got Ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains(expected),
+        "expected error containing '{}', got: {}",
+        expected,
+        err
+    );
+}
+
 /// Helper: compile source and expect a compile error containing the given substring.
 fn expect_compile_error(source: &str, expected: &str) {
     let result = compile(source);
@@ -1251,4 +1266,410 @@ emit len(result)
 "#;
     let out = run(src);
     assert_eq!(out, vec!["0", "10", "20", "3"]);
+}
+
+// ===================================================================
+// Phase 7: Error Handling — try/catch/throw
+// ===================================================================
+
+#[test]
+fn test_try_catch_basic() {
+    let src = r#"
+try {
+    throw "something went wrong"
+} catch err {
+    emit err
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["something went wrong"]);
+}
+
+#[test]
+fn test_try_catch_no_error() {
+    let src = r#"
+try {
+    emit "ok"
+} catch err {
+    emit "caught"
+}
+emit "done"
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["ok", "done"]);
+}
+
+#[test]
+fn test_throw_unhandled() {
+    run_error("throw \"boom\"", "unhandled error: boom");
+}
+
+#[test]
+fn test_try_catch_with_code_after_throw() {
+    let src = r#"
+try {
+    emit "before"
+    throw "error"
+    emit "after"
+} catch err {
+    emit err
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["before", "error"]);
+}
+
+#[test]
+fn test_nested_try_catch() {
+    let src = r#"
+try {
+    try {
+        throw "inner"
+    } catch e {
+        emit e
+    }
+    throw "outer"
+} catch e {
+    emit e
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["inner", "outer"]);
+}
+
+#[test]
+fn test_try_catch_throw_number() {
+    let src = r#"
+try {
+    throw 42
+} catch err {
+    emit err
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["42"]);
+}
+
+#[test]
+fn test_try_catch_in_function() {
+    let src = r#"
+fn safe_divide(a: num, b: num) -> num {
+    if b == 0 {
+        throw "division by zero"
+    }
+    return a / b
+}
+
+try {
+    let result = safe_divide(10, 0)
+    emit result
+} catch err {
+    emit err
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["division by zero"]);
+}
+
+#[test]
+fn test_try_catch_normal_value() {
+    let src = r#"
+fn safe_divide(a: num, b: num) -> num {
+    if b == 0 {
+        throw "division by zero"
+    }
+    return a / b
+}
+
+try {
+    let result = safe_divide(10, 2)
+    emit result
+} catch err {
+    emit "error"
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["5"]);
+}
+
+// ===================================================================
+// Phase 7: Assert
+// ===================================================================
+
+#[test]
+fn test_assert_pass() {
+    let src = r#"
+assert true
+emit "ok"
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["ok"]);
+}
+
+#[test]
+fn test_assert_fail_default_message() {
+    run_error("assert false", "unhandled error: assertion failed");
+}
+
+#[test]
+fn test_assert_fail_custom_message() {
+    run_error(
+        "assert false, \"expected value to be true\"",
+        "unhandled error: expected value to be true",
+    );
+}
+
+#[test]
+fn test_assert_with_expression() {
+    let src = r#"
+let x = 5
+assert x > 3, "x should be greater than 3"
+emit "passed"
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["passed"]);
+}
+
+#[test]
+fn test_assert_caught_by_try() {
+    let src = r#"
+try {
+    assert false, "test failed"
+} catch err {
+    emit err
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["test failed"]);
+}
+
+#[test]
+fn test_assert_in_loop() {
+    let src = r#"
+let items = [1, 2, 3]
+for item in items {
+    assert item > 0, "item should be positive"
+}
+emit "all passed"
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["all passed"]);
+}
+
+// ===================================================================
+// Phase 7: Retry
+// ===================================================================
+
+#[test]
+fn test_retry_no_error() {
+    let src = r#"
+let result = retry 3 {
+    42
+}
+emit result
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["42"]);
+}
+
+#[test]
+fn test_retry_with_counter() {
+    let src = r#"
+let attempt = 0
+try {
+    let result = retry 3 {
+        attempt = attempt + 1
+        if attempt < 3 {
+            throw "not yet"
+        }
+        attempt
+    }
+    emit result
+} catch err {
+    emit "failed"
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["3"]);
+}
+
+#[test]
+fn test_retry_exhausted() {
+    let src = r#"
+try {
+    let result = retry 2 {
+        throw "always fails"
+    }
+} catch err {
+    emit err
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["always fails"]);
+}
+
+#[test]
+fn test_retry_unhandled_exhausted() {
+    let src = r#"
+let x = retry 1 {
+    throw "fail"
+}
+"#;
+    run_error(src, "unhandled error: fail");
+}
+
+#[test]
+fn test_retry_with_assert() {
+    let src = r#"
+let count = 0
+try {
+    let val = retry 5 {
+        count = count + 1
+        assert count >= 3, "not ready"
+        count
+    }
+    emit val
+} catch err {
+    emit "failed"
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["3"]);
+}
+
+// ===================================================================
+// Phase 7: parse_json / to_json
+// ===================================================================
+
+#[test]
+fn test_parse_json_object() {
+    let src = r#"
+let data = parse_json("\{\"name\": \"Alice\", \"age\": 30\}")
+emit data["name"]
+emit data["age"]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["Alice", "30"]);
+}
+
+#[test]
+fn test_parse_json_array() {
+    let src = r#"
+let items = parse_json("[1, 2, 3]")
+emit items[0]
+emit items[1]
+emit items[2]
+emit len(items)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["1", "2", "3", "3"]);
+}
+
+#[test]
+fn test_parse_json_nested() {
+    let src = r#"
+let data = parse_json("\{\"user\": \{\"name\": \"Bob\"\}, \"scores\": [10, 20]\}")
+emit data["user"]["name"]
+emit data["scores"][0]
+emit data["scores"][1]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["Bob", "10", "20"]);
+}
+
+#[test]
+fn test_parse_json_primitives() {
+    let src = r#"
+let n = parse_json("42")
+let b = parse_json("true")
+let s = parse_json("\"hello\"")
+let x = parse_json("null")
+emit n
+emit b
+emit s
+emit x
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["42", "true", "hello", "none"]);
+}
+
+#[test]
+fn test_parse_json_error_caught() {
+    let src = r#"
+try {
+    let data = parse_json("not valid json")
+    emit "should not reach"
+} catch err {
+    emit "caught"
+}
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["caught"]);
+}
+
+#[test]
+fn test_to_json_map() {
+    let src = r#"
+let data = {"name": "Alice", "age": 30}
+let json = to_json(data)
+emit json
+"#;
+    // Map ordering is non-deterministic, so parse it back and check
+    let out = run(src);
+    assert!(out[0].contains("\"name\": \"Alice\""));
+    assert!(out[0].contains("\"age\": 30"));
+}
+
+#[test]
+fn test_to_json_list() {
+    let src = r#"
+let items = [1, 2, 3]
+emit to_json(items)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["[1, 2, 3]"]);
+}
+
+#[test]
+fn test_to_json_primitives() {
+    let src = r#"
+emit to_json(42)
+emit to_json(true)
+emit to_json("hello")
+emit to_json(none)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["42", "true", "\"hello\"", "null"]);
+}
+
+#[test]
+fn test_parse_json_roundtrip() {
+    let src = r#"
+let original = [1, 2, 3]
+let json = to_json(original)
+let parsed = parse_json(json)
+emit parsed[0]
+emit parsed[1]
+emit parsed[2]
+emit len(parsed)
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["1", "2", "3", "3"]);
+}
+
+#[test]
+fn test_parse_json_with_retry() {
+    let src = r#"
+let attempt = 0
+let result = retry 3 {
+    attempt = attempt + 1
+    if attempt < 2 {
+        throw "simulated LLM bad response"
+    }
+    parse_json("\{\"status\": \"ok\"\}")
+}
+emit result["status"]
+"#;
+    let out = run(src);
+    assert_eq!(out, vec!["ok"]);
 }

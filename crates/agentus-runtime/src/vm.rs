@@ -55,6 +55,19 @@ struct CallFrame {
     agent_id: Option<u64>,
 }
 
+/// An error handler pushed by TryBegin, popped by TryEnd or Throw.
+#[allow(dead_code)]
+struct ErrorHandler {
+    /// Absolute PC to jump to on error (the catch block).
+    catch_pc: usize,
+    /// Register to store error value in.
+    err_reg: u8,
+    /// Call stack depth when handler was pushed.
+    call_stack_depth: usize,
+    /// Function index of the frame that contains the catch handler.
+    function_idx: u32,
+}
+
 /// The Agentus Virtual Machine.
 pub struct VM {
     module: Module,
@@ -70,6 +83,10 @@ pub struct VM {
     next_agent_id: u64,
     /// Host interface for LLM execution.
     host: Box<dyn HostInterface>,
+    /// Error handler stack for try/catch.
+    error_handlers: Vec<ErrorHandler>,
+    /// Current error value (set by throw, read by GetError).
+    current_error: Option<Value>,
 }
 
 impl VM {
@@ -82,6 +99,8 @@ impl VM {
             agents: HashMap::new(),
             next_agent_id: 1,
             host: Box::new(NoHost),
+            error_handlers: Vec::new(),
+            current_error: None,
         }
     }
 
@@ -598,6 +617,25 @@ impl VM {
                         _ => return Err(format!("cannot push to {:?}", list)),
                     }
                 }
+                OpCode::ParseJson => {
+                    let (a, b) = (inst.a() as usize, inst.b() as usize);
+                    let val = self.get_register(b).clone();
+                    let json_str = val.to_string();
+                    match Value::parse_json(&json_str) {
+                        Ok(parsed) => self.set_register(a, parsed),
+                        Err(e) => {
+                            // Throw a parse error
+                            let err_val = Value::from_string(format!("parse_json error: {}", e));
+                            self.throw_error(err_val)?;
+                        }
+                    }
+                }
+                OpCode::ToJson => {
+                    let (a, b) = (inst.a() as usize, inst.b() as usize);
+                    let val = self.get_register(b).clone();
+                    let json = val.to_json();
+                    self.set_register(a, Value::from_string(json));
+                }
                 OpCode::StrLen => {
                     let (a, b) = (inst.a() as usize, inst.b() as usize);
                     let val = self.get_register(b).clone();
@@ -805,6 +843,33 @@ impl VM {
                     self.set_register(result_reg, Value::from_string(result));
                 }
 
+                // Error handling
+                OpCode::TryBegin => {
+                    let err_reg = inst.a();
+                    let offset = inst.sbx_16();
+                    let frame = self.call_stack.last().unwrap();
+                    let catch_pc = (frame.pc as i32 + offset as i32) as usize;
+                    self.error_handlers.push(ErrorHandler {
+                        catch_pc,
+                        err_reg,
+                        call_stack_depth: self.call_stack.len(),
+                        function_idx: frame.function_idx,
+                    });
+                }
+                OpCode::TryEnd => {
+                    self.error_handlers.pop();
+                }
+                OpCode::Throw => {
+                    let a = inst.a() as usize;
+                    let error_value = self.get_register(a).clone();
+                    self.throw_error(error_value)?;
+                }
+                OpCode::GetError => {
+                    let a = inst.a() as usize;
+                    let error = self.current_error.clone().unwrap_or(Value::None);
+                    self.set_register(a, error);
+                }
+
                 // Stubs for not-yet-implemented opcodes
                 _ => {
                     return Err(format!("opcode {:?} not yet implemented", opcode));
@@ -893,6 +958,23 @@ impl VM {
             .last()
             .and_then(|f| f.agent_id)
             .ok_or_else(|| "not in an agent context".to_string())
+    }
+
+    fn throw_error(&mut self, error: Value) -> Result<(), String> {
+        if let Some(handler) = self.error_handlers.pop() {
+            // Unwind call stack to the handler's depth
+            while self.call_stack.len() > handler.call_stack_depth {
+                self.call_stack.pop();
+            }
+            // Store error and jump to catch
+            self.current_error = Some(error);
+            let frame = self.call_stack.last_mut().unwrap();
+            frame.pc = handler.catch_pc;
+            Ok(())
+        } else {
+            // No handler — propagate as runtime error
+            Err(format!("unhandled error: {}", error))
+        }
     }
 
     fn get_agent_context(&self) -> (Option<String>, Option<String>) {

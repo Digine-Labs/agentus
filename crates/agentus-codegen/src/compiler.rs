@@ -161,6 +161,13 @@ impl<'a> FunctionEmitter<'a> {
                     _ => Err("field assignment is only supported on 'self'".to_string()),
                 }
             }
+            Stmt::TryCatch(tc) => self.compile_try_catch(tc),
+            Stmt::Throw(t) => {
+                let val_reg = self.compile_expr(&t.value)?;
+                self.emit(Instruction::op_a(OpCode::Throw, val_reg));
+                Ok(())
+            }
+            Stmt::Assert(a) => self.compile_assert(a),
         }
     }
 
@@ -417,6 +424,78 @@ impl<'a> FunctionEmitter<'a> {
         Ok(())
     }
 
+    fn compile_try_catch(&mut self, tc: &TryCatchStmt) -> Result<(), String> {
+        let err_reg = self.alloc_register();
+
+        // TryBegin — push handler; offset to catch is placeholder
+        let try_begin_pos = self.current_offset();
+        self.emit(Instruction::asbx(OpCode::TryBegin, err_reg, 0));
+
+        // Try body
+        for s in &tc.try_body {
+            self.compile_stmt(s)?;
+        }
+
+        // TryEnd — pop handler (normal completion)
+        self.emit(Instruction::op_only(OpCode::TryEnd));
+
+        // Jump over catch block
+        let jmp_over_catch = self.current_offset();
+        self.emit(Instruction::sbx(OpCode::Jmp, 0)); // placeholder
+
+        // Catch entry point
+        let catch_start = self.current_offset();
+
+        // Patch TryBegin offset
+        let catch_offset = (catch_start as i16) - (try_begin_pos as i16) - 1;
+        self.instructions[try_begin_pos] =
+            Instruction::asbx(OpCode::TryBegin, err_reg, catch_offset);
+
+        // GetError into catch variable register
+        self.emit(Instruction::op_a(OpCode::GetError, err_reg));
+        self.locals.insert(tc.catch_var.clone(), err_reg);
+
+        // Catch body
+        for s in &tc.catch_body {
+            self.compile_stmt(s)?;
+        }
+
+        // Patch jump-over-catch
+        let after_catch = self.current_offset();
+        let jmp_offset = (after_catch as i32) - (jmp_over_catch as i32) - 1;
+        self.instructions[jmp_over_catch] = Instruction::sbx(OpCode::Jmp, jmp_offset);
+
+        Ok(())
+    }
+
+    fn compile_assert(&mut self, a: &AssertStmt) -> Result<(), String> {
+        let cond_reg = self.compile_expr(&a.condition)?;
+
+        // JmpTrue => skip the throw if condition is true
+        let jmp_pos = self.current_offset();
+        self.emit(Instruction::asbx(OpCode::JmpTrue, cond_reg, 0)); // placeholder
+
+        // Load error message
+        let msg_reg = if let Some(msg) = &a.message {
+            self.compile_expr(msg)?
+        } else {
+            let reg = self.alloc_register();
+            let idx = self.builder.add_string_constant("assertion failed");
+            self.emit(Instruction::abx(OpCode::LoadConst, reg, idx));
+            reg
+        };
+
+        // Throw
+        self.emit(Instruction::op_a(OpCode::Throw, msg_reg));
+
+        // Patch jump
+        let after = self.current_offset();
+        let offset = (after as i16) - (jmp_pos as i16) - 1;
+        self.instructions[jmp_pos] = Instruction::asbx(OpCode::JmpTrue, cond_reg, offset);
+
+        Ok(())
+    }
+
     /// Compile an expression and return the register it's stored in.
     fn compile_expr(&mut self, expr: &Expr) -> Result<u8, String> {
         match expr {
@@ -538,6 +617,24 @@ impl<'a> FunctionEmitter<'a> {
                     let arg_reg = self.compile_expr(&args[0])?;
                     let result_reg = self.alloc_register();
                     self.emit(Instruction::abc(OpCode::Len, result_reg, arg_reg, 0));
+                    return Ok(result_reg);
+                }
+                if name == "parse_json" {
+                    if args.len() != 1 {
+                        return Err("parse_json() takes exactly 1 argument".to_string());
+                    }
+                    let arg_reg = self.compile_expr(&args[0])?;
+                    let result_reg = self.alloc_register();
+                    self.emit(Instruction::abc(OpCode::ParseJson, result_reg, arg_reg, 0));
+                    return Ok(result_reg);
+                }
+                if name == "to_json" {
+                    if args.len() != 1 {
+                        return Err("to_json() takes exactly 1 argument".to_string());
+                    }
+                    let arg_reg = self.compile_expr(&args[0])?;
+                    let result_reg = self.alloc_register();
+                    self.emit(Instruction::abc(OpCode::ToJson, result_reg, arg_reg, 0));
                     return Ok(result_reg);
                 }
 
@@ -770,6 +867,88 @@ impl<'a> FunctionEmitter<'a> {
                 let target_reg = self.compile_expr(target)?;
                 let result_reg = self.alloc_register();
                 self.emit(Instruction::abc(OpCode::Recv, result_reg, target_reg, 0));
+                Ok(result_reg)
+            }
+            Expr::Retry(attempts, body, _) => {
+                let attempts_reg = self.compile_expr(attempts)?;
+                let counter_reg = self.alloc_register();
+                let result_reg = self.alloc_register();
+                let err_reg = self.alloc_register();
+                let one_reg = self.alloc_register();
+                let cmp_reg = self.alloc_register();
+
+                let zero_idx = self.builder.add_num_constant(0.0);
+                let one_idx = self.builder.add_num_constant(1.0);
+
+                // counter = 0
+                self.emit(Instruction::abx(OpCode::LoadConst, counter_reg, zero_idx));
+
+                // loop_start:
+                let loop_start = self.current_offset();
+
+                // TryBegin err_reg, offset_to_catch (placeholder)
+                let try_begin_pos = self.current_offset();
+                self.emit(Instruction::asbx(OpCode::TryBegin, err_reg, 0));
+
+                // Compile body — capture last ExprStmt result
+                let mut last_expr_reg = None;
+                if let Some((last, rest)) = body.split_last() {
+                    for s in rest {
+                        self.compile_stmt(s)?;
+                    }
+                    match last {
+                        Stmt::ExprStmt(e) => {
+                            last_expr_reg = Some(self.compile_expr(e)?);
+                        }
+                        _ => {
+                            self.compile_stmt(last)?;
+                        }
+                    }
+                }
+
+                // TryEnd (normal completion)
+                self.emit(Instruction::op_only(OpCode::TryEnd));
+
+                // Move result
+                if let Some(expr_reg) = last_expr_reg {
+                    self.emit(Instruction::abc(OpCode::Move, result_reg, expr_reg, 0));
+                } else {
+                    self.emit(Instruction::op_a(OpCode::LoadNone, result_reg));
+                }
+
+                // Jump to end
+                let jmp_to_end_pos = self.current_offset();
+                self.emit(Instruction::sbx(OpCode::Jmp, 0)); // placeholder
+
+                // Catch entry point
+                let catch_start = self.current_offset();
+
+                // Patch TryBegin
+                let catch_offset = (catch_start as i16) - (try_begin_pos as i16) - 1;
+                self.instructions[try_begin_pos] =
+                    Instruction::asbx(OpCode::TryBegin, err_reg, catch_offset);
+
+                // GetError
+                self.emit(Instruction::op_a(OpCode::GetError, err_reg));
+
+                // counter += 1
+                self.emit(Instruction::abx(OpCode::LoadConst, one_reg, one_idx));
+                self.emit(Instruction::abc(OpCode::Add, counter_reg, counter_reg, one_reg));
+
+                // if counter < attempts: jump to loop_start
+                self.emit(Instruction::abc(OpCode::Lt, cmp_reg, counter_reg, attempts_reg));
+                let jmp_retry_pos = self.current_offset();
+                let loop_back_offset = (loop_start as i16) - (jmp_retry_pos as i16) - 1;
+                self.emit(Instruction::asbx(OpCode::JmpTrue, cmp_reg, loop_back_offset));
+
+                // Re-throw (all retries exhausted)
+                self.emit(Instruction::op_a(OpCode::Throw, err_reg));
+
+                // End
+                let end_pos = self.current_offset();
+                let end_offset = (end_pos as i32) - (jmp_to_end_pos as i32) - 1;
+                self.instructions[jmp_to_end_pos] = Instruction::sbx(OpCode::Jmp, end_offset);
+
                 Ok(result_reg)
             }
         }

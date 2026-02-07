@@ -38,6 +38,12 @@ pub enum Stmt {
     Send(SendStmt),
     /// Index assignment: `collection[key] = value`
     IndexAssign(IndexAssignStmt),
+    /// Try/catch: `try { ... } catch err { ... }`
+    TryCatch(TryCatchStmt),
+    /// Throw: `throw expr`
+    Throw(ThrowStmt),
+    /// Assert: `assert condition, "message"`
+    Assert(AssertStmt),
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +138,27 @@ pub struct IndexAssignStmt {
 }
 
 #[derive(Debug, Clone)]
+pub struct TryCatchStmt {
+    pub try_body: Vec<Stmt>,
+    pub catch_var: String,
+    pub catch_body: Vec<Stmt>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThrowStmt {
+    pub value: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct AssertStmt {
+    pub condition: Expr,
+    pub message: Option<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct ToolDef {
     pub name: String,
     pub description: Option<String>,
@@ -218,6 +245,8 @@ pub enum Expr {
     ExecBlock(Box<Expr>, Span),
     /// Recv expression: recv agent_handle
     Recv(Box<Expr>, Span),
+    /// Retry expression: retry N { body }
+    Retry(Box<Expr>, Vec<Stmt>, Span),
 }
 
 impl Expr {
@@ -239,6 +268,7 @@ impl Expr {
             Expr::MapLit(_, s) => *s,
             Expr::ExecBlock(_, s) => *s,
             Expr::Recv(_, s) => *s,
+            Expr::Retry(_, _, s) => *s,
         }
     }
 }

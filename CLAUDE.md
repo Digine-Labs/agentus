@@ -168,7 +168,7 @@ Follow this pipeline in order. Each step must be complete before the next.
 - **Phase 4** DONE: Tools (tool declarations, default params, TCall opcode, host-provided implementations)
 - **Phase 5** PARTIAL: Multi-agent (Send/Recv done, Wait/Kill/scheduler TODO)
 - **Phase 6** DONE: Collections (map literals, map ops, list push/index-set, len())
-- **Phase 7** TODO: Error handling (try/catch/throw)
+- **Phase 7** DONE: Error handling + resilience (try/catch/throw, assert, retry, parse_json/to_json)
 - **Phase 8** TODO: Pipelines (pipeline/stage syntax, PipelineRun opcode)
 - **Phase 9** TODO: Polish (binary serialization for .agc, better error messages, LSP)
 

@@ -66,6 +66,9 @@ impl Parser {
             TokenKind::Agent => self.parse_agent_def(),
             TokenKind::Tool => self.parse_tool_def(),
             TokenKind::Send => self.parse_send(),
+            TokenKind::Try => self.parse_try_catch(),
+            TokenKind::Throw => self.parse_throw(),
+            TokenKind::Assert => self.parse_assert(),
             _ => {
                 // Try to parse as expression statement or assignment
                 let expr = self.parse_expression(0)?;
@@ -496,6 +499,56 @@ impl Parser {
         }))
     }
 
+    fn parse_try_catch(&mut self) -> Result<Stmt, String> {
+        let start = self.current_span();
+        self.expect(TokenKind::Try)?;
+        self.expect(TokenKind::LBrace)?;
+        let try_body = self.parse_block()?;
+        self.expect(TokenKind::RBrace)?;
+        self.skip_newlines();
+        self.expect(TokenKind::Catch)?;
+        let catch_var = self.expect_ident()?;
+        self.expect(TokenKind::LBrace)?;
+        let catch_body = self.parse_block()?;
+        self.expect(TokenKind::RBrace)?;
+        let span = start.merge(self.prev_span());
+        self.expect_statement_end()?;
+        Ok(Stmt::TryCatch(TryCatchStmt {
+            try_body,
+            catch_var,
+            catch_body,
+            span,
+        }))
+    }
+
+    fn parse_throw(&mut self) -> Result<Stmt, String> {
+        let start = self.current_span();
+        self.expect(TokenKind::Throw)?;
+        let value = self.parse_expression(0)?;
+        let span = start.merge(value.span());
+        self.expect_statement_end()?;
+        Ok(Stmt::Throw(ThrowStmt { value, span }))
+    }
+
+    fn parse_assert(&mut self) -> Result<Stmt, String> {
+        let start = self.current_span();
+        self.expect(TokenKind::Assert)?;
+        let condition = self.parse_expression(0)?;
+        let message = if self.current_kind() == TokenKind::Comma {
+            self.advance(); // consume comma
+            Some(self.parse_expression(0)?)
+        } else {
+            Option::None
+        };
+        let span = start.merge(self.prev_span());
+        self.expect_statement_end()?;
+        Ok(Stmt::Assert(AssertStmt {
+            condition,
+            message,
+            span,
+        }))
+    }
+
     fn parse_params(&mut self) -> Result<Vec<Param>, String> {
         let mut params = Vec::new();
         if self.current_kind() == TokenKind::RParen {
@@ -750,6 +803,16 @@ impl Parser {
                 let target = self.parse_postfix()?;
                 let span = start.merge(target.span());
                 Ok(Expr::Recv(Box::new(target), span))
+            }
+            TokenKind::Retry => {
+                let start = self.current_span();
+                self.advance(); // consume 'retry'
+                let attempts = self.parse_expression(0)?;
+                self.expect(TokenKind::LBrace)?;
+                let body = self.parse_block()?;
+                self.expect(TokenKind::RBrace)?;
+                let span = start.merge(self.prev_span());
+                Ok(Expr::Retry(Box::new(attempts), body, span))
             }
             TokenKind::SelfKw => {
                 let span = self.current_span();
