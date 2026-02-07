@@ -1,0 +1,9 @@
+[package]
+name = "agentus-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agentus-common.workspace = true
+serde.workspace = true

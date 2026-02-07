@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agentus-common",
+    "crates/agentus-lexer",
+    "crates/agentus-parser",
+    "crates/agentus-sema",
+    "crates/agentus-ir",
+    "crates/agentus-codegen",
+    "crates/agentus-runtime",
+    "crates/agentus-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+# Shared across crates
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+
+# Internal crates
+agentus-common = { path = "crates/agentus-common" }
+agentus-lexer = { path = "crates/agentus-lexer" }
+agentus-parser = { path = "crates/agentus-parser" }
+agentus-sema = { path = "crates/agentus-sema" }
+agentus-ir = { path = "crates/agentus-ir" }
+agentus-codegen = { path = "crates/agentus-codegen" }
+agentus-runtime = { path = "crates/agentus-runtime" }

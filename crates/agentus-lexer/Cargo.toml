@@ -1,0 +1,8 @@
+[package]
+name = "agentus-lexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agentus-common.workspace = true

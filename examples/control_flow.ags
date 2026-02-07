@@ -1,0 +1,6 @@
+let x = 10
+if x > 5 {
+    emit "x is greater than 5"
+} else {
+    emit "x is 5 or less"
+}

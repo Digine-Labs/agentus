@@ -1,0 +1,4 @@
+let items = ["apple", "banana", "cherry"]
+for item in items {
+    emit item
+}

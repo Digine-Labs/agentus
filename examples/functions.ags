@@ -1,0 +1,13 @@
+fn add(a: num, b: num) -> num {
+    return a + b
+}
+
+fn greet(name: str) -> str {
+    return "Hello, " ++ name ++ "!"
+}
+
+let sum = add(10, 32)
+emit sum
+
+let msg = greet("Agentus")
+emit msg

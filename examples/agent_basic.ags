@@ -1,0 +1,26 @@
+agent Counter {
+    model = "gpt-4o"
+    system prompt { "You are a counting assistant." }
+
+    memory {
+        count: num = 0
+    }
+
+    fn increment() -> num {
+        self.count = self.count + 1
+        return self.count
+    }
+
+    fn get_count() -> num {
+        return self.count
+    }
+}
+
+let c = Counter()
+emit c.increment()
+emit c.increment()
+emit c.increment()
+emit c.get_count()
+
+let result = exec { "What is 2+2?" }
+emit result

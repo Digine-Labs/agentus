@@ -1,0 +1,10 @@
+[package]
+name = "agentus-sema"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agentus-common.workspace = true
+agentus-parser.workspace = true
+agentus-ir.workspace = true

@@ -1,0 +1,6 @@
+let count = 0
+while count < 5 {
+    emit count
+    count = count + 1
+}
+emit "done"

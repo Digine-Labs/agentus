@@ -1,0 +1,14 @@
+let name = "World"
+let greeting = "Hello, {name}!"
+emit greeting
+
+let a = 10
+let b = 32
+emit "The sum of {a} and {b} is {a + b}"
+
+// Nested with function calls
+fn double(x: num) -> num {
+    return x * 2
+}
+
+emit "Double of {a} is {double(a)}"
